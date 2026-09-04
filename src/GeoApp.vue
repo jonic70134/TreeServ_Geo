@@ -2,6 +2,8 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import type { User } from 'firebase/auth';
 import { importLibrary, setOptions } from '@googlemaps/js-api-loader';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { auth, db, firebaseReady, googleSignIn, onAuthStateChanged, signOut, userRole, addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from './firebase';
 
 type WorkRecord = { id: string; locationId: string; title: string; notes: string; imageUrls: string[]; youtubeUrls: string[]; fileUrls: string[]; authorName: string; createdAt?: any; dateLabel?: string };
@@ -27,6 +29,7 @@ const user = ref<User | null>(null);
 const toast = ref('');
 const mapEl = ref<HTMLElement | null>(null);
 const map = ref<any>(null);
+const mapProvider = ref<'google'|'leaflet'>('leaflet');
 const markers = ref<any[]>([]);
 let authStop: undefined | (() => void);
 let locationsStop: undefined | (() => void);
@@ -41,7 +44,7 @@ const suggestions = computed(() => {
   if (!needle) return locations.value.slice(0,5);
   return locations.value.filter((item) => [item.name,item.address,...(item.aliases||[])].join(' ').toLowerCase().includes(needle)).slice(0,6);
 });
-const isMapReady = computed(() => Boolean(import.meta.env.VITE_GOOGLE_MAPS_API_KEY));
+const isGoogleReady = computed(() => Boolean(import.meta.env.VITE_GOOGLE_MAPS_API_KEY));
 
 function notify(message:string){ toast.value=message; window.setTimeout(()=>{ if(toast.value===message) toast.value=''; },2600); }
 function cleanUrls(value:string){ return value.split(/\n|,/).map((v)=>v.trim()).filter((v)=>/^https?:\/\//i.test(v)); }
@@ -50,17 +53,33 @@ function fileName(url:string){ try { return decodeURIComponent(new URL(url).path
 function selectLocation(place:Location){ activeId.value=place.id; searchText.value=place.name; searchOpen.value=false; map.value?.panTo({lat:place.lat,lng:place.lng}); map.value?.setZoom(16); }
 
 async function initMap(){
-  if(!isMapReady.value || !mapEl.value) return;
+  if(!mapEl.value) return;
+  if(!isGoogleReady.value){
+    mapProvider.value='leaflet';
+    map.value=L.map(mapEl.value,{zoomControl:false,attributionControl:true}).setView([25.066,121.615],14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:20,attribution:'© OpenStreetMap contributors'}).addTo(map.value);
+    drawMarkers();
+    return;
+  }
   try{
     setOptions({key:import.meta.env.VITE_GOOGLE_MAPS_API_KEY,v:'weekly',language:'zh-TW',region:'TW'});
     const {Map}=await importLibrary('maps') as any;
-    map.value=new Map(mapEl.value,{center:{lat:25.066,lng:121.615},zoom:14,mapId:import.meta.env.VITE_GOOGLE_MAP_ID || 'DEMO_MAP_ID',disableDefaultUI:true,zoomControl:true,gestureHandling:'greedy'});
+    mapProvider.value='google';
+    map.value=new Map(mapEl.value,{center:{lat:25.066,lng:121.615},zoom:14,mapId:import.meta.env.VITE_GOOGLE_MAP_ID || 'DEMO_MAP_ID',disableDefaultUI:true,zoomControl:false,gestureHandling:'greedy'});
     drawMarkers();
   }catch{ notify('Google Maps 載入失敗，已切換為預覽地圖'); }
 }
 async function drawMarkers(){
   if(!map.value) return;
-  markers.value.forEach((marker)=>marker.setMap?.(null)); markers.value=[];
+  markers.value.forEach((marker)=>marker.setMap?.(null) ?? marker.remove?.()); markers.value=[];
+  if(mapProvider.value==='leaflet'){
+    locations.value.forEach((place)=>{
+      const count=records.value.filter(r=>r.locationId===place.id).length || place.records?.length || 1;
+      const marker=L.marker([place.lat,place.lng],{icon:L.divIcon({className:'leaflet-tree-marker',html:`<span>${count}</span>`,iconSize:[38,38],iconAnchor:[19,36]})}).addTo(map.value);
+      marker.bindTooltip(place.name,{direction:'top',offset:[0,-32]}); marker.on('click',()=>selectLocation(place)); markers.value.push(marker);
+    });
+    return;
+  }
   const {Marker}=await importLibrary('marker') as any;
   locations.value.forEach((place)=>{
     const marker=new Marker({map:map.value,position:{lat:place.lat,lng:place.lng},title:place.name,label:String((records.value.filter(r=>r.locationId===place.id).length || place.records?.length || 1))});
@@ -69,8 +88,12 @@ async function drawMarkers(){
 }
 function locateMe(){ navigator.geolocation?.getCurrentPosition(({coords})=>{ map.value?.panTo({lat:coords.latitude,lng:coords.longitude}); map.value?.setZoom(16); notify('已移動到目前位置'); },()=>notify('無法取得位置，請檢查瀏覽器權限')); }
 async function geocodeAddress(){
-  if(!form.address || !isMapReady.value) return;
-  try{ const {Geocoder}=await importLibrary('geocoding') as any; const result=await new Geocoder().geocode({address:form.address,region:'TW'}); const point=result.results[0]?.geometry.location; if(point){form.lat=point.lat();form.lng=point.lng();notify('已自動定位地點');} }catch{ notify('找不到這個地址，請確認後再試'); }
+  if(!form.address) return;
+  try{
+    if(isGoogleReady.value){ const {Geocoder}=await importLibrary('geocoding') as any; const result=await new Geocoder().geocode({address:form.address,region:'TW'}); const point=result.results[0]?.geometry.location; if(point){form.lat=point.lat();form.lng=point.lng();notify('已自動定位地點');return;} }
+    else { const response=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=tw&q=${encodeURIComponent(form.address)}`,{headers:{'Accept-Language':'zh-TW'}}); const result=await response.json(); if(result[0]){form.lat=Number(result[0].lat);form.lng=Number(result[0].lon);map.value?.setView?.([form.lat,form.lng],16);notify('已自動定位地點');return;} }
+    notify('找不到這個地址，請確認後再試');
+  }catch{ notify('找不到這個地址，請確認後再試'); }
 }
 
 function resetForm(){ Object.assign(form,{name:'',address:'',status:'進行中',attention:'',title:'',notes:'',imageUrls:'',youtubeUrls:'',fileUrls:'',lat:25.0684,lng:121.6158}); editing.value=null; }
@@ -144,11 +167,10 @@ watch(()=>locations.value.length,()=>drawMarkers());
         <div class="permission-card"><strong>權限說明</strong><p><b>訪客</b> 可查看；<b>User</b> 可建立與編輯；<b>Owner</b> 可完整管理與刪除。</p></div>
       </aside>
 
-      <div :class="['map-stage',{fallback:!isMapReady}]">
+      <div class="map-stage">
         <div ref="mapEl" class="google-map"></div>
-        <template v-if="!isMapReady"><div class="river"/><div class="road road-a"/><div class="road road-b"/><div class="road road-c"/><span class="district d1">台北市</span><span class="district d2">內湖區</span><span class="district d3">南港區</span><button v-for="(place,index) in locations" :key="place.id" :class="['fake-marker',{selected:place.id===activeLocation?.id,warning:place.status.includes('注意')} ]" :style="{left:(24+(index*23)%58)+'%',top:(30+(index*19)%46)+'%'}" @click="selectLocation(place)"><span>⌖</span><b>{{place.records?.length || records.filter(r=>r.locationId===place.id).length}}</b></button></template>
         <div class="map-tools"><button @click="map?.setZoom((map?.getZoom()||14)+1)">＋</button><button @click="map?.setZoom((map?.getZoom()||14)-1)">−</button><button @click="locateMe" title="移動到目前位置">◎</button></div>
-        <div class="map-legend"><i/> {{firebaseReady?'Firestore 即時同步中':'加入金鑰後啟用 Google Maps 與 Firebase'}}</div>
+        <div class="map-legend"><i/> {{isGoogleReady?'Google Maps':'OpenStreetMap 備援地圖'}} · {{firebaseReady?'Firestore 即時同步':'示範資料'}}</div>
       </div>
 
       <aside v-if="activeLocation" class="record-panel">
