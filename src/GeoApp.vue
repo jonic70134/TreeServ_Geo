@@ -45,9 +45,10 @@ const suggestions = computed(() => {
   if (!needle) return locations.value.slice(0,5);
   return locations.value.filter((item) => [item.name,item.address,...(item.aliases||[])].join(' ').toLowerCase().includes(needle)).slice(0,6);
 });
+const preferredMapProvider = getRuntimeConfig()?.mapProvider || import.meta.env.VITE_MAP_PROVIDER || 'openstreetmap';
 const googleMapsApiKey = getRuntimeConfig()?.googleMapsApiKey || import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const googleMapId = getRuntimeConfig()?.googleMapId || import.meta.env.VITE_GOOGLE_MAP_ID;
-const isGoogleReady = computed(() => Boolean(googleMapsApiKey));
+const isGoogleReady = computed(() => preferredMapProvider === 'google' && Boolean(googleMapsApiKey));
 
 function notify(message:string){ toast.value=message; window.setTimeout(()=>{ if(toast.value===message) toast.value=''; },2600); }
 function cleanUrls(value:string){ return value.split(/\n|,/).map((v)=>v.trim()).filter((v)=>/^https?:\/\//i.test(v)); }
