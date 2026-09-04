@@ -4,7 +4,7 @@ import type { User } from 'firebase/auth';
 import { importLibrary, setOptions } from '@googlemaps/js-api-loader';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { auth, db, firebaseReady, googleSignIn, onAuthStateChanged, signOut, userRole, addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from './firebase';
+import { auth, db, firebaseReady, googleSignIn, onAuthStateChanged, signOut, userRole, addDoc, collection, deleteDoc, doc, getDocs, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, writeBatch } from './firebase';
 import { getRuntimeConfig } from './runtime-config';
 import { crewOptions, demoLocations } from './demo-data';
 
@@ -17,6 +17,7 @@ const demos = ref<Location[]>(demoLocations as Location[]);
 const locations = ref<Location[]>([]);
 const records = ref<WorkRecord[]>([]);
 const activeId = ref('import-zhishan');
+const activeRecordId = ref('');
 const searchText = ref('');
 const searchOpen = ref(false);
 const focusedSuggestion = ref(0);
@@ -32,6 +33,7 @@ const mapProvider = ref<'google'|'leaflet'>('leaflet');
 const markers = ref<any[]>([]);
 const markerByLocation = new Map<string, { open: () => void }>();
 const weatherLoading = ref(false);
+const cleanupLoading = ref(false);
 let authStop: undefined | (() => void);
 let locationsStop: undefined | (() => void);
 let recordsStop: undefined | (() => void);
@@ -39,8 +41,10 @@ let recordsStop: undefined | (() => void);
 const emptyRecordFields = { workDate:'', endDate:'', crew:[] as string[], meetingTime:'07:30', meetingPlace:'', mapUrl:'', weather:'', hospitalName:'', hospitalPhone:'', hospitalDistance:'', hospitalTravelTime:'', workDetails:'', assignments:'', crane:'', disposal:'', parking:'', roadPermit:'', equipment:'', safetyNotes:'' };
 const form = reactive({ name:'', address:'', status:'進行中', attention:'', title:'', notes:'', imageUrls:'', youtubeUrls:'', fileUrls:'', lat:25.0684, lng:121.6158, ...structuredClone(emptyRecordFields) });
 const role = computed(() => userRole(user.value));
+const legacyLocationCount = computed(() => locations.value.filter((location)=>!location.isDemo).length);
 const activeLocation = computed(() => locations.value.find((item) => item.id === activeId.value) ?? locations.value[0]);
 const activeRecords = computed(() => activeLocation.value ? locationRecords(activeLocation.value) : []);
+const activeRecord = computed(() => activeRecords.value.find((record)=>record.id===activeRecordId.value) ?? activeRecords.value[0]);
 function locationRecords(location:Location){
   if(location.isDemo) return location.records ?? [];
   const synced = records.value.filter((record) => record.locationId === location.id);
@@ -88,6 +92,21 @@ const isGoogleReady = computed(() => preferredMapProvider === 'google' && Boolea
 
 function notify(message:string){ toast.value=message; window.setTimeout(()=>{ if(toast.value===message) toast.value=''; },2600); }
 function cleanUrls(value:string){ return value.split(/\n|,/).map((v)=>v.trim()).filter((v)=>/^https?:\/\//i.test(v)); }
+function escapeHtml(value:string){ return value.replace(/[&<>"']/g,(character)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[character] ?? character)); }
+function linkify(value?:string){
+  if(!value) return '';
+  const pattern=/https?:\/\/[^\s]+/gi; let output=''; let lastIndex=0;
+  for(const match of value.matchAll(pattern)){
+    const start=match.index ?? 0; let url=match[0]; let trailing='';
+    while(/[),.;，。！!？?]$/.test(url)){trailing=url.slice(-1)+trailing;url=url.slice(0,-1);}
+    output+=escapeHtml(value.slice(lastIndex,start));
+    output+=`<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>${escapeHtml(trailing)}`;
+    lastIndex=start+match[0].length;
+  }
+  return output+escapeHtml(value.slice(lastIndex));
+}
+function recordTabLabel(record:WorkRecord,index:number){ return record.workDate || record.dateLabel || `第 ${index+1} 天`; }
+function combinedSafety(record:WorkRecord){ return [activeLocation.value?.attention,record.safetyNotes].filter(Boolean).join('\n'); }
 function youtubeId(url:string){ const match=url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([\w-]{11})/); return match?.[1] ?? ''; }
 function fileName(url:string){ try { return decodeURIComponent(new URL(url).pathname.split('/').pop() || '開啟附件'); } catch { return '開啟附件'; } }
 function locationRecordCount(place:Location){ return locationRecords(place).length; }
@@ -233,6 +252,16 @@ async function removeRecord(record:WorkRecord){
   if(db) await deleteDoc(doc(db,'workRecords',record.id)); else records.value=records.value.filter((item)=>item.id!==record.id);
   notify('紀錄已刪除');
 }
+async function purgeLegacyData(){
+  if(role.value!=='owner'||!db||cleanupLoading.value)return;
+  if(!window.confirm(`即將永久刪除 ${legacyLocationCount.value} 個舊格式案場及所有舊工作紀錄，確定繼續？`))return;
+  cleanupLoading.value=true;
+  try{
+    const [locationSnapshot,recordSnapshot]=await Promise.all([getDocs(collection(db,'locations')),getDocs(collection(db,'workRecords'))]);
+    const batch=writeBatch(db); recordSnapshot.docs.forEach((item)=>batch.delete(item.ref)); locationSnapshot.docs.forEach((item)=>batch.delete(item.ref));
+    await batch.commit(); notify(`已刪除 ${locationSnapshot.size} 個舊案場與 ${recordSnapshot.size} 筆舊紀錄`);
+  }catch(error){notify(error instanceof Error?error.message:'舊資料清理失敗');}finally{cleanupLoading.value=false;}
+}
 async function login(){ try{ await googleSignIn(); notify('已使用 Google 帳號登入'); }catch(error){ notify(error instanceof Error?error.message:'登入失敗'); } }
 async function logout(){ if(auth){await signOut(auth);notify('已登出');} }
 
@@ -248,6 +277,7 @@ onMounted(async()=>{
 });
 onUnmounted(()=>{window.removeEventListener('keydown',handleSearchShortcut);authStop?.();locationsStop?.();recordsStop?.();});
 watch([()=>locations.value.length,()=>records.value.length],()=>drawMarkers());
+watch(()=>`${activeId.value}:${activeRecords.value.map((record)=>record.id).join(',')}`,()=>{activeRecordId.value=activeRecords.value[0]?.id ?? '';},{immediate:true});
 </script>
 
 <template>
@@ -266,8 +296,8 @@ watch([()=>locations.value.length,()=>records.value.length],()=>drawMarkers());
     <section class="workspace">
       <aside class="places-panel">
         <div class="panel-heading"><div><small>工作地點</small><strong>{{locations.length}} 個案場</strong></div><span class="sync-state"><i/>{{firebaseReady?'即時同步':'離線預覽'}}</span></div>
-        <div class="place-list"><button v-for="(place,index) in locations" :key="place.id" :class="['place-row',{active:place.id===activeLocation?.id,warn:place.status.includes('注意')} ]" @click="selectLocation(place)"><span class="place-index">{{String(index+1).padStart(2,'0')}}</span><span><strong>{{place.name}}</strong><small><i v-if="place.isDemo" class="demo-tag">群組匯入</i>{{locationRecordCount(place)}} 筆紀錄 · {{place.status}}</small></span><b v-if="place.status.includes('注意')">!</b></button></div>
-        <div class="permission-card"><strong>權限說明</strong><p><b>訪客</b> 可查看；<b>User</b> 可建立與編輯；<b>Owner</b> 可完整管理與刪除。</p></div>
+        <div class="place-list"><button v-for="(place,index) in locations" :key="place.id" :class="['place-row',{active:place.id===activeLocation?.id,warn:place.status.includes('注意')} ]" @click="selectLocation(place)"><span class="place-index">{{String(index+1).padStart(2,'0')}}</span><span><strong>{{place.name}}</strong><small>{{locationRecordCount(place)}} 筆紀錄 · {{place.status}}</small></span><b v-if="place.status.includes('注意')">!</b></button></div>
+        <div class="permission-card"><strong>權限說明</strong><p><b>訪客</b> 可查看；<b>User</b> 可建立與編輯；<b>Owner</b> 可完整管理與刪除。</p><button v-if="role==='owner'&&legacyLocationCount" class="cleanup-button" :disabled="cleanupLoading" @click="purgeLegacyData">{{cleanupLoading?'清理中…':`清除 ${legacyLocationCount} 個舊格式案場`}}</button></div>
       </aside>
 
       <div class="map-stage">
@@ -277,25 +307,37 @@ watch([()=>locations.value.length,()=>records.value.length],()=>drawMarkers());
       </div>
 
       <aside v-if="activeLocation" class="record-panel">
-        <div class="record-head"><small>目前位置{{activeLocation.isDemo?' · 群組匯入紀錄':''}}</small><span>{{activeLocation.status}}</span></div><h1>{{activeLocation.name}}</h1><p class="address">{{activeLocation.address}}</p><div class="record-summary"><span>{{activeRecords.length}} 筆紀錄</span><button v-if="role!=='guest'" @click="openCreate(true)">＋ 新增</button></div>
-        <div v-if="activeLocation.attention" class="attention"><b>!</b><div><strong>進場前注意</strong><p>{{activeLocation.attention}}</p></div></div>
-        <div class="timeline-title"><strong>工作時間軸</strong><small>最新在前</small></div>
-        <div v-if="activeRecords.length" class="timeline">
-          <article v-for="record in activeRecords" :key="record.id"><i/><time>{{record.workDate || record.dateLabel || record.createdAt?.toDate?.().toLocaleString('zh-TW') || '最近更新'}}<template v-if="record.endDate"> — {{record.endDate}}</template></time><strong>{{record.title}}</strong><p>{{record.notes}}</p>
-            <div v-if="record.meetingTime||record.meetingPlace||record.mapUrl" class="brief-grid"><div><small>集合</small><b>{{record.meetingTime||'時間待確認'}}</b><span>{{record.meetingPlace||'地點待確認'}}</span></div><a v-if="record.mapUrl" :href="record.mapUrl" target="_blank" rel="noopener noreferrer">開啟定位 ↗</a></div>
-            <div v-if="record.crew?.length" class="record-block"><small>出席人員 · {{record.crew.length}} 人</small><div class="crew-chips"><span v-for="member in record.crew" :key="member">{{member}}</span></div></div>
-            <div v-if="record.weather" class="info-callout weather-card"><small>當日天氣</small><p>{{record.weather}}</p></div>
-            <div v-if="record.hospitalName" class="info-callout hospital-card"><small>緊急醫療</small><b>{{record.hospitalName}}<template v-if="record.hospitalPhone"> · {{record.hospitalPhone}}</template></b><span>{{[record.hospitalDistance,record.hospitalTravelTime].filter(Boolean).join(' · ')}}</span></div>
-            <div v-if="record.workDetails" class="record-block"><small>工作內容</small><p>{{record.workDetails}}</p></div>
-            <div v-if="record.assignments" class="record-block"><small>人員分組／協力廠商</small><p>{{record.assignments}}</p></div>
-            <div v-if="record.crane||record.disposal" class="detail-pair"><div v-if="record.crane"><small>吊車</small><p>{{record.crane}}</p></div><div v-if="record.disposal"><small>清運</small><p>{{record.disposal}}</p></div></div>
-            <div v-if="record.parking" class="record-block"><small>停車／卸裝備動線</small><p>{{record.parking}}</p></div>
-            <div v-if="record.roadPermit" class="record-block"><small>路權</small><p>{{record.roadPermit}}</p></div>
-            <div v-if="record.equipment" class="record-block"><small>裝備與工具</small><p>{{record.equipment}}</p></div>
-            <div v-if="record.safetyNotes" class="info-callout safety-card"><small>安全與注意事項</small><p>{{record.safetyNotes}}</p></div>
-            <div v-if="record.imageUrls?.length" class="image-grid"><img v-for="url in record.imageUrls" :key="url" :src="url" :alt="`${record.title} 現場照片`" loading="lazy"></div><div v-for="url in record.youtubeUrls" :key="url" class="video"><iframe v-if="youtubeId(url)" :src="`https://www.youtube-nocookie.com/embed/${youtubeId(url)}`" title="工作紀錄影片" loading="lazy" allowfullscreen/></div><div class="files"><a v-for="url in record.fileUrls" :key="url" :href="url" target="_blank" rel="noopener noreferrer"><span>↗</span>{{fileName(url)}}</a></div><div class="record-meta"><span>由 {{record.authorName}} 記錄</span><div v-if="role!=='guest'&&!activeLocation?.isDemo"><button @click="openEdit(record)">編輯</button><button v-if="role==='owner'" class="danger" @click="removeRecord(record)">刪除</button></div><span v-else-if="activeLocation?.isDemo" class="demo-readonly">群組匯入 · 唯讀</span></div>
-          </article>
-        </div><div v-else class="empty-state"><span>⌖</span><strong>尚無工作紀錄</strong><p>登入後新增第一筆，讓下一位到場的人少走冤枉路。</p></div>
+        <div class="record-head"><small>案場紀錄</small><span>{{activeLocation.status}}</span></div>
+        <h1>{{activeLocation.name}}</h1>
+        <p class="address" v-html="linkify(activeLocation.address)"></p>
+        <div class="record-summary"><span>{{activeRecords.length}} 天紀錄</span><button v-if="role!=='guest'&&!activeLocation.isDemo" @click="openCreate(true)">＋ 新增</button></div>
+
+        <div v-if="activeRecords.length>1" class="day-tabs" role="tablist" aria-label="選擇施工日期">
+          <button v-for="(record,index) in activeRecords" :key="record.id" type="button" role="tab" :aria-selected="record.id===activeRecord?.id" :class="{active:record.id===activeRecord?.id}" @click="activeRecordId=record.id"><span>{{recordTabLabel(record,index)}}</span><small>第 {{index+1}} 天</small></button>
+        </div>
+
+        <article v-if="activeRecord" class="record-sheet">
+          <header class="record-title"><time>{{activeRecord.workDate || activeRecord.dateLabel || activeRecord.createdAt?.toDate?.().toLocaleString('zh-TW') || '最近更新'}}<template v-if="activeRecord.endDate"> 至 {{activeRecord.endDate}}</template></time><h2>{{activeRecord.title}}</h2><p v-html="linkify(activeRecord.notes)"></p></header>
+          <div class="record-lines">
+            <div v-if="combinedSafety(activeRecord)" class="record-line safety-line"><strong>安全與進場注意</strong><p v-html="linkify(combinedSafety(activeRecord))"></p></div>
+            <div v-if="activeRecord.meetingTime||activeRecord.meetingPlace||activeRecord.mapUrl" class="record-line"><strong>集合</strong><p><b>{{activeRecord.meetingTime||'時間待確認'}}</b><template v-if="activeRecord.meetingPlace">　<span v-html="linkify(activeRecord.meetingPlace)"></span></template><br v-if="activeRecord.mapUrl"><a v-if="activeRecord.mapUrl" :href="activeRecord.mapUrl" target="_blank" rel="noopener noreferrer">開啟地圖定位</a></p></div>
+            <div v-if="activeRecord.crew?.length" class="record-line"><strong>出席人員</strong><p class="crew-inline"><span v-for="member in activeRecord.crew" :key="member">{{member}}</span></p></div>
+            <div v-if="activeRecord.weather" class="record-line"><strong>當日天氣</strong><p v-html="linkify(activeRecord.weather)"></p></div>
+            <div v-if="activeRecord.hospitalName" class="record-line"><strong>緊急醫療</strong><p><b>{{activeRecord.hospitalName}}</b><template v-if="activeRecord.hospitalPhone">　{{activeRecord.hospitalPhone}}</template><br><span>{{[activeRecord.hospitalDistance,activeRecord.hospitalTravelTime].filter(Boolean).join('　')}}</span></p></div>
+            <div v-if="activeRecord.workDetails" class="record-line"><strong>工作內容</strong><p v-html="linkify(activeRecord.workDetails)"></p></div>
+            <div v-if="activeRecord.assignments" class="record-line"><strong>人員分組／協力</strong><p v-html="linkify(activeRecord.assignments)"></p></div>
+            <div v-if="activeRecord.crane" class="record-line"><strong>吊車</strong><p v-html="linkify(activeRecord.crane)"></p></div>
+            <div v-if="activeRecord.disposal" class="record-line"><strong>清運</strong><p v-html="linkify(activeRecord.disposal)"></p></div>
+            <div v-if="activeRecord.parking" class="record-line"><strong>停車／卸裝備</strong><p v-html="linkify(activeRecord.parking)"></p></div>
+            <div v-if="activeRecord.roadPermit" class="record-line"><strong>路權</strong><p v-html="linkify(activeRecord.roadPermit)"></p></div>
+            <div v-if="activeRecord.equipment" class="record-line"><strong>裝備與工具</strong><p v-html="linkify(activeRecord.equipment)"></p></div>
+          </div>
+          <div v-if="activeRecord.imageUrls?.length" class="image-grid"><img v-for="url in activeRecord.imageUrls" :key="url" :src="url" :alt="`${activeRecord.title} 現場照片`" loading="lazy"></div>
+          <div v-for="url in activeRecord.youtubeUrls" :key="url" class="video"><iframe v-if="youtubeId(url)" :src="`https://www.youtube-nocookie.com/embed/${youtubeId(url)}`" title="工作紀錄影片" loading="lazy" allowfullscreen/></div>
+          <div class="files"><a v-for="url in activeRecord.fileUrls" :key="url" :href="url" target="_blank" rel="noopener noreferrer"><span>↗</span>{{fileName(url)}}</a></div>
+          <div class="record-meta"><span>由 {{activeRecord.authorName}} 記錄</span><div v-if="role!=='guest'&&!activeLocation?.isDemo"><button @click="openEdit(activeRecord)">編輯</button><button v-if="role==='owner'" class="danger" @click="removeRecord(activeRecord)">刪除</button></div><span v-else-if="activeLocation?.isDemo" class="demo-readonly">匯入紀錄 · 唯讀</span></div>
+        </article>
+        <div v-else class="empty-state"><span>⌖</span><strong>尚無工作紀錄</strong><p>登入後新增第一筆，讓下一位到場的人少走冤枉路。</p></div>
       </aside>
     </section>
 
