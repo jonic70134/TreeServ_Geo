@@ -22,13 +22,15 @@ service cloud.firestore {
 
     match /locations/{locationId} {
       allow read: if true;
-      allow create, update: if canWrite();
+      allow create: if canWrite() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isOwner() || (canWrite() && resource.data.createdBy == request.auth.uid && request.resource.data.createdBy == resource.data.createdBy);
       allow delete: if isOwner();
     }
 
     match /workRecords/{recordId} {
       allow read: if true;
-      allow create, update: if canWrite();
+      allow create: if canWrite() && request.resource.data.authorId == request.auth.uid;
+      allow update: if isOwner() || (canWrite() && resource.data.authorId == request.auth.uid && request.resource.data.authorId == resource.data.authorId);
       allow delete: if isOwner();
     }
 
