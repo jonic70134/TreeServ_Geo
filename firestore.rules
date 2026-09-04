@@ -1,0 +1,42 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner() {
+      return signedIn() && request.auth.token.email == 'jonic70134@gmail.com';
+    }
+
+    // Authenticated accounts default to user. A future custom `role` claim can
+    // add editor/manager roles without changing the data model.
+    function canWrite() {
+      return signedIn() && (
+        isOwner() ||
+        !('role' in request.auth.token) ||
+        request.auth.token.role in ['user', 'editor', 'manager', 'owner']
+      );
+    }
+
+    match /locations/{locationId} {
+      allow read: if true;
+      allow create, update: if canWrite();
+      allow delete: if isOwner();
+    }
+
+    match /workRecords/{recordId} {
+      allow read: if true;
+      allow create, update: if canWrite();
+      allow delete: if isOwner();
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.auth.uid == userId && request.resource.data.role == 'user';
+      allow update: if isOwner() || (signedIn() && request.auth.uid == userId && request.resource.data.role == resource.data.role);
+      allow delete: if isOwner();
+    }
+  }
+}
