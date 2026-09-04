@@ -11,6 +11,7 @@ export default function Home() {
       messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? '',
       appId: process.env.VITE_FIREBASE_APP_ID ?? '',
     },
+    mapProvider: process.env.VITE_MAP_PROVIDER === 'google' ? 'google' : 'openstreetmap',
     googleMapsApiKey: process.env.VITE_GOOGLE_MAPS_API_KEY ?? '',
     googleMapId: process.env.VITE_GOOGLE_MAP_ID ?? '',
   };
