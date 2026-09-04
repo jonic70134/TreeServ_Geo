@@ -7,6 +7,7 @@ export type TreeServRuntimeConfig = {
     messagingSenderId: string;
     appId: string;
   };
+  mapProvider: 'openstreetmap' | 'google';
   googleMapsApiKey: string;
   googleMapId: string;
 };
