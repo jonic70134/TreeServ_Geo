@@ -9,6 +9,7 @@ import { getRuntimeConfig } from './runtime-config';
 
 type WorkRecord = { id: string; locationId: string; title: string; notes: string; imageUrls: string[]; youtubeUrls: string[]; fileUrls: string[]; authorName: string; createdAt?: any; dateLabel?: string };
 type Location = { id: string; name: string; address: string; lat: number; lng: number; status: string; attention: string; aliases: string[]; records?: WorkRecord[]; updatedAt?: any };
+type SearchSuggestion = { location: Location; context: string; score: number };
 
 const demos = ref<Location[]>([
   { id:'donghu-elementary', name:'東湖國小', address:'台北市內湖區東湖路 115 號', lat:25.0684, lng:121.6158, status:'施工中', attention:'西側管道間訊號較弱，請先下載圖面。下午四點後由警衛室側門進出。', aliases:['東湖','國小'], records:[
@@ -24,6 +25,8 @@ const records = ref<WorkRecord[]>([]);
 const activeId = ref('donghu-elementary');
 const searchText = ref('');
 const searchOpen = ref(false);
+const focusedSuggestion = ref(0);
+const searchInput = ref<HTMLInputElement | null>(null);
 const showCreate = ref(false);
 const editing = ref<WorkRecord | null>(null);
 const user = ref<User | null>(null);
@@ -32,6 +35,7 @@ const mapEl = ref<HTMLElement | null>(null);
 const map = ref<any>(null);
 const mapProvider = ref<'google'|'leaflet'>('leaflet');
 const markers = ref<any[]>([]);
+const markerByLocation = new Map<string, { open: () => void }>();
 let authStop: undefined | (() => void);
 let locationsStop: undefined | (() => void);
 let recordsStop: undefined | (() => void);
@@ -40,10 +44,44 @@ const form = reactive({ name:'', address:'', status:'進行中', attention:'', t
 const role = computed(() => userRole(user.value));
 const activeLocation = computed(() => locations.value.find((item) => item.id === activeId.value) ?? locations.value[0]);
 const activeRecords = computed(() => records.value.length ? records.value.filter((item) => item.locationId === activeLocation.value?.id) : activeLocation.value?.records ?? []);
+function locationRecords(location:Location){
+  const synced = records.value.filter((record) => record.locationId === location.id);
+  return synced.length || records.value.length ? synced : location.records ?? [];
+}
+function normalizeSearch(value:string){
+  return value.normalize('NFKC').toLocaleLowerCase('zh-TW').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+}
 const suggestions = computed(() => {
-  const needle = searchText.value.trim().toLowerCase();
-  if (!needle) return locations.value.slice(0,5);
-  return locations.value.filter((item) => [item.name,item.address,...(item.aliases||[])].join(' ').toLowerCase().includes(needle)).slice(0,6);
+  const needle = normalizeSearch(searchText.value);
+  if (!needle) return locations.value.slice(0,6).map((location,index)=>({location,context:location.address,score:100-index}));
+  const terms = needle.split(/\s+/).filter(Boolean);
+  return locations.value.map((location):SearchSuggestion | null=>{
+    const linkedRecords = locationRecords(location);
+    const normalizedName = normalizeSearch(location.name);
+    const normalizedAddress = normalizeSearch(location.address);
+    const normalizedAliases = (location.aliases ?? []).map(normalizeSearch);
+    const normalizedAttention = normalizeSearch(location.attention ?? '');
+    const recordTexts = linkedRecords.map((record)=>({
+      record,
+      text:normalizeSearch([record.title,record.notes,record.authorName].filter(Boolean).join(' '))
+    }));
+    const searchable = [normalizedName,normalizedAddress,...normalizedAliases,normalizedAttention,...recordTexts.map((entry)=>entry.text)].join(' ');
+    if(!terms.every((term)=>searchable.includes(term))) return null;
+
+    let score=10;
+    if(normalizedName===needle) score=120;
+    else if(normalizedName.startsWith(needle)) score=100;
+    else if(normalizedName.includes(needle)) score=90;
+    else if(normalizedAliases.some((alias)=>alias===needle)) score=80;
+    else if(normalizedAliases.some((alias)=>alias.includes(needle))) score=70;
+    else if(normalizedAddress.includes(needle)) score=60;
+    else if(normalizedAttention.includes(needle)) score=40;
+    const matchedRecord = recordTexts.find((entry)=>terms.every((term)=>entry.text.includes(term)))?.record;
+    const context = matchedRecord
+      ? `紀錄：${matchedRecord.title}${matchedRecord.notes ? ` · ${matchedRecord.notes}` : ''}`
+      : normalizedAttention.includes(needle) ? `注意：${location.attention}` : location.address;
+    return {location,context,score};
+  }).filter((item):item is SearchSuggestion=>Boolean(item)).sort((a,b)=>b.score-a.score || a.location.name.localeCompare(b.location.name,'zh-TW')).slice(0,8);
 });
 const preferredMapProvider = getRuntimeConfig()?.mapProvider || import.meta.env.VITE_MAP_PROVIDER || 'openstreetmap';
 const googleMapsApiKey = getRuntimeConfig()?.googleMapsApiKey || import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -54,7 +92,37 @@ function notify(message:string){ toast.value=message; window.setTimeout(()=>{ if
 function cleanUrls(value:string){ return value.split(/\n|,/).map((v)=>v.trim()).filter((v)=>/^https?:\/\//i.test(v)); }
 function youtubeId(url:string){ const match=url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([\w-]{11})/); return match?.[1] ?? ''; }
 function fileName(url:string){ try { return decodeURIComponent(new URL(url).pathname.split('/').pop() || '開啟附件'); } catch { return '開啟附件'; } }
-function selectLocation(place:Location){ activeId.value=place.id; searchText.value=place.name; searchOpen.value=false; map.value?.panTo({lat:place.lat,lng:place.lng}); map.value?.setZoom(16); }
+function locationRecordCount(place:Location){ return locationRecords(place).length; }
+function createPopupContent(place:Location){
+  const content=document.createElement('div'); content.className='map-popup-content';
+  const title=document.createElement('strong'); title.textContent=place.name; content.appendChild(title);
+  const address=document.createElement('p'); address.textContent=place.address; content.appendChild(address);
+  const meta=document.createElement('span'); meta.textContent=`${locationRecordCount(place)} 筆紀錄 · ${place.status}`; content.appendChild(meta);
+  if(place.attention){ const attention=document.createElement('small'); attention.textContent=`注意：${place.attention}`; content.appendChild(attention); }
+  return content;
+}
+function selectLocation(place:Location){
+  activeId.value=place.id; searchText.value=place.name; searchOpen.value=false;
+  if(mapProvider.value==='leaflet') map.value?.setView?.([place.lat,place.lng],16,{animate:true});
+  else { map.value?.panTo?.({lat:place.lat,lng:place.lng}); map.value?.setZoom?.(16); }
+  markerByLocation.get(place.id)?.open();
+}
+function onSearchInput(){ searchOpen.value=true; focusedSuggestion.value=0; }
+function moveSuggestion(direction:number){
+  if(!searchOpen.value) searchOpen.value=true;
+  if(!suggestions.value.length) return;
+  focusedSuggestion.value=(focusedSuggestion.value+direction+suggestions.value.length)%suggestions.value.length;
+}
+function chooseFocusedSuggestion(){ const item=suggestions.value[focusedSuggestion.value]; if(item) selectLocation(item.location); }
+function closeSearch(event:FocusEvent){
+  const next=event.relatedTarget as Node | null;
+  if(!next || !(event.currentTarget as HTMLElement).contains(next)) searchOpen.value=false;
+}
+function handleSearchShortcut(event:KeyboardEvent){
+  if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='k'){
+    event.preventDefault(); searchInput.value?.focus(); searchInput.value?.select(); searchOpen.value=true;
+  }
+}
 
 async function initMap(){
   if(!mapEl.value) return;
@@ -75,19 +143,21 @@ async function initMap(){
 }
 async function drawMarkers(){
   if(!map.value) return;
-  markers.value.forEach((marker)=>marker.setMap?.(null) ?? marker.remove?.()); markers.value=[];
+  markers.value.forEach((marker)=>marker.setMap?.(null) ?? marker.remove?.()); markers.value=[]; markerByLocation.clear();
   if(mapProvider.value==='leaflet'){
     locations.value.forEach((place)=>{
-      const count=records.value.filter(r=>r.locationId===place.id).length || place.records?.length || 1;
+      const count=locationRecordCount(place);
       const marker=L.marker([place.lat,place.lng],{icon:L.divIcon({className:'leaflet-tree-marker',html:`<span>${count}</span>`,iconSize:[38,38],iconAnchor:[19,36]})}).addTo(map.value);
-      marker.bindTooltip(place.name,{direction:'top',offset:[0,-32]}); marker.on('click',()=>selectLocation(place)); markers.value.push(marker);
+      marker.bindTooltip(place.name,{direction:'top',offset:[0,-32]}); marker.bindPopup(createPopupContent(place),{offset:[0,-28]}); marker.on('click',()=>selectLocation(place)); markers.value.push(marker); markerByLocation.set(place.id,{open:()=>marker.openPopup()});
     });
     return;
   }
   const {Marker}=await importLibrary('marker') as any;
+  const {InfoWindow}=await importLibrary('maps') as any;
   locations.value.forEach((place)=>{
-    const marker=new Marker({map:map.value,position:{lat:place.lat,lng:place.lng},title:place.name,label:String((records.value.filter(r=>r.locationId===place.id).length || place.records?.length || 1))});
-    marker.addListener('click',()=>selectLocation(place)); markers.value.push(marker);
+    const marker=new Marker({map:map.value,position:{lat:place.lat,lng:place.lng},title:place.name,label:String(locationRecordCount(place))});
+    const info=new InfoWindow({content:createPopupContent(place)});
+    marker.addListener('click',()=>selectLocation(place)); markers.value.push(marker); markerByLocation.set(place.id,{open:()=>info.open({anchor:marker,map:map.value})});
   });
 }
 function locateMe(){ navigator.geolocation?.getCurrentPosition(({coords})=>{ map.value?.panTo({lat:coords.latitude,lng:coords.longitude}); map.value?.setZoom(16); notify('已移動到目前位置'); },()=>notify('無法取得位置，請檢查瀏覽器權限')); }
@@ -139,6 +209,7 @@ async function login(){ try{ await googleSignIn(); notify('已使用 Google 帳�
 async function logout(){ if(auth){await signOut(auth);notify('已登出');} }
 
 onMounted(async()=>{
+  window.addEventListener('keydown',handleSearchShortcut);
   locations.value=firebaseReady?[]:demos.value;
   if(auth) authStop=onAuthStateChanged(auth,(account)=>{user.value=account;});
   if(db){
@@ -147,17 +218,17 @@ onMounted(async()=>{
   }
   await nextTick(); initMap();
 });
-onUnmounted(()=>{authStop?.();locationsStop?.();recordsStop?.();});
-watch(()=>locations.value.length,()=>drawMarkers());
+onUnmounted(()=>{window.removeEventListener('keydown',handleSearchShortcut);authStop?.();locationsStop?.();recordsStop?.();});
+watch([()=>locations.value.length,()=>records.value.length],()=>drawMarkers());
 </script>
 
 <template>
   <main class="app-shell">
     <header class="topbar">
       <button class="brand" @click="activeId=locations[0]?.id"><span class="brand-pin">⌖</span><span><strong>TreeServ Geo</strong><small>案場工作紀錄</small></span></button>
-      <div class="search-wrap">
-        <label class="global-search"><span>⌕</span><input v-model="searchText" @focus="searchOpen=true" @keydown.escape="searchOpen=false" placeholder="搜尋地點、案場或紀錄…" aria-label="搜尋已記錄地點"><kbd>⌘ K</kbd></label>
-        <div v-if="searchOpen" class="suggestions"><button v-for="item in suggestions" :key="item.id" @click="selectLocation(item)"><span class="mini-pin">⌖</span><span><strong>{{item.name}}</strong><small>{{item.address}}</small></span><em>{{item.records?.length || records.filter(r=>r.locationId===item.id).length}} 筆</em></button><p v-if="!suggestions.length">找不到相符地點</p></div>
+      <div class="search-wrap" @focusout="closeSearch">
+        <label class="global-search"><span>⌕</span><input ref="searchInput" v-model="searchText" @focus="searchOpen=true" @input="onSearchInput" @keydown.down.prevent="moveSuggestion(1)" @keydown.up.prevent="moveSuggestion(-1)" @keydown.enter.prevent="chooseFocusedSuggestion" @keydown.escape="searchOpen=false" placeholder="搜尋地點、地址、注意事項或紀錄…" aria-label="搜尋已記錄地點" role="combobox" aria-autocomplete="list" :aria-expanded="searchOpen" aria-controls="location-search-results"><kbd>⌘ K</kbd></label>
+        <div v-if="searchOpen" id="location-search-results" class="suggestions" role="listbox"><button v-for="(item,index) in suggestions" :key="item.location.id" :class="{focused:index===focusedSuggestion}" role="option" :aria-selected="index===focusedSuggestion" @mouseenter="focusedSuggestion=index" @click="selectLocation(item.location)"><span class="mini-pin">⌖</span><span><strong>{{item.location.name}}</strong><small>{{item.context}}</small></span><em>{{locationRecordCount(item.location)}} 筆</em></button><p v-if="!suggestions.length">找不到符合「{{searchText.trim()}}」的地點或紀錄</p></div>
       </div>
       <button class="primary-action" @click="openCreate"><span>＋</span>建立工作紀錄</button>
       <button v-if="!user" class="login-button" @click="login">使用 Google 登入</button>
