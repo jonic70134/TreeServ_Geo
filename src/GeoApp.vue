@@ -5,6 +5,7 @@ import { importLibrary, setOptions } from '@googlemaps/js-api-loader';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { auth, db, firebaseReady, googleSignIn, onAuthStateChanged, signOut, userRole, addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from './firebase';
+import { getRuntimeConfig } from './runtime-config';
 
 type WorkRecord = { id: string; locationId: string; title: string; notes: string; imageUrls: string[]; youtubeUrls: string[]; fileUrls: string[]; authorName: string; createdAt?: any; dateLabel?: string };
 type Location = { id: string; name: string; address: string; lat: number; lng: number; status: string; attention: string; aliases: string[]; records?: WorkRecord[]; updatedAt?: any };
@@ -44,7 +45,9 @@ const suggestions = computed(() => {
   if (!needle) return locations.value.slice(0,5);
   return locations.value.filter((item) => [item.name,item.address,...(item.aliases||[])].join(' ').toLowerCase().includes(needle)).slice(0,6);
 });
-const isGoogleReady = computed(() => Boolean(import.meta.env.VITE_GOOGLE_MAPS_API_KEY));
+const googleMapsApiKey = getRuntimeConfig()?.googleMapsApiKey || import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+const googleMapId = getRuntimeConfig()?.googleMapId || import.meta.env.VITE_GOOGLE_MAP_ID;
+const isGoogleReady = computed(() => Boolean(googleMapsApiKey));
 
 function notify(message:string){ toast.value=message; window.setTimeout(()=>{ if(toast.value===message) toast.value=''; },2600); }
 function cleanUrls(value:string){ return value.split(/\n|,/).map((v)=>v.trim()).filter((v)=>/^https?:\/\//i.test(v)); }
@@ -62,10 +65,10 @@ async function initMap(){
     return;
   }
   try{
-    setOptions({key:import.meta.env.VITE_GOOGLE_MAPS_API_KEY,v:'weekly',language:'zh-TW',region:'TW'});
+    setOptions({key:googleMapsApiKey,v:'weekly',language:'zh-TW',region:'TW'});
     const {Map}=await importLibrary('maps') as any;
     mapProvider.value='google';
-    map.value=new Map(mapEl.value,{center:{lat:25.066,lng:121.615},zoom:14,mapId:import.meta.env.VITE_GOOGLE_MAP_ID || 'DEMO_MAP_ID',disableDefaultUI:true,zoomControl:false,gestureHandling:'greedy'});
+    map.value=new Map(mapEl.value,{center:{lat:25.066,lng:121.615},zoom:14,mapId:googleMapId || 'DEMO_MAP_ID',disableDefaultUI:false,zoomControl:true,gestureHandling:'greedy'});
     drawMarkers();
   }catch{ notify('Google Maps 載入失敗，已切換為預覽地圖'); }
 }
