@@ -1,130 +1,72 @@
+type ImportedRecord = Record<string, unknown>;
+
+function record(id:string, locationId:string, fields:ImportedRecord){
+  return { id, locationId, imageUrls:[], youtubeUrls:[], fileUrls:[], authorName:'群組案場紀錄', ...fields };
+}
+
+export const crewOptions = ['白','肯','誠','浩','儀','庭','修','陳','得','丸','鴻','橘','球','韻','歐','力','綺','斌','薛','康','方'];
+
 export const demoLocations = [
   {
-    id:'demo-urban-banyan',
-    name:'展示案例｜都會公園老榕樹',
-    address:'臺北市大安區（示範座標）',
-    lat:25.0337,
-    lng:121.5352,
-    status:'待複查',
-    attention:'示範資料：假日人流密集。檢查與作業前須先劃設落枝警戒區，並安排地面人員管制行人動線。',
-    aliases:['榕樹','公園','風險評估','TRAQ','VTA'],
-    isDemo:true,
+    id:'import-zhishan', name:'芝山文化生態綠園', address:'臺北市士林區芝山文化生態綠園', lat:25.1042763, lng:121.5319248, status:'注意事項', aliases:['芝山綠園','暖房'], isDemo:true,
+    attention:'暖房與野鳥籠舍緊鄰作業區；全攀並需 Rigging。卸裝備後須徒步約 200 公尺（含階梯），或繞行約 250 公尺坡道。',
+    records:[record('import-r01','import-zhishan',{dateLabel:'11/06',title:'暖房周邊修剪及伐除',crew:['白','肯','誠','浩','儀','庭','修'],meetingTime:'08:00',meetingPlace:'園區正門',mapUrl:'https://maps.app.goo.gl/MbaM5dPMP8obyovB9',weather:'連續小雨、風大；請準備雨衣與替換衣物。',hospitalName:'臺北市立聯合醫院陽明院區',hospitalDistance:'130 m',hospitalTravelTime:'1 分鐘',notes:'伐除 3 棵、修剪 5 棵，詳見修剪計畫。作業區旁為玻璃暖房與野鳥籠舍。',workDetails:'全攀作業，需 Rigging。樹木分切後堆置於周邊空地。',assignments:'同安清運 06:00：白；芝山綠園：肯、誠、浩、儀、庭、修。',disposal:'無清運，需分切堆置在周邊空地。',parking:'卸裝備後徒步約 200 公尺（含階梯）；繞行坡道約 250 公尺。',equipment:'攀樹人員完整個人裝備；Rigging 3 組（扁帶包）；樹上電動鏈鋸全套（含 201、電池系列工具）；地面鏈鋸 550 × 1。',safetyNotes:'雨天與強風作業，留意濕滑階梯、暖房玻璃及籠舍。'})]
+  },
+  {
+    id:'import-longshan',name:'龍山國小',address:'臺北市萬華區龍山國民小學',lat:25.035511,lng:121.49673,status:'注意事項',aliases:['廣州街70巷'],isDemo:true,attention:'先在廣州街 70 巷卸裝備，08:00 後才可將車輛停入學校；高溫作業注意中暑。',
+    records:[record('import-r02','import-longshan',{dateLabel:'6/21',title:'70 巷側樹木修剪作業',crew:[],meetingTime:'07:30',meetingPlace:'廣州街 70 巷卸裝備處',mapUrl:'https://maps.app.goo.gl/AueLpn8NwGyJ9AXQ8',weather:'晴，體感可達 42°C；多帶飲水並注意中暑。',hospitalName:'臺大醫院',hospitalDistance:'3.2 公里',hospitalTravelTime:'10 分鐘',notes:'作業內容依計畫書，全部位於廣州街 70 巷。',workDetails:'可能採 Climber 綁妥後吊切的方式，依現場條件決定。',crane:'吊車 1 天',disposal:'小夾下午進場。',parking:'先於廣州街 70 巷卸裝備，08:00 後可停入學校。',safetyNotes:'高溫曝曬，補水並安排降溫休息。'})]
+  },
+  {
+    id:'import-huajiang',name:'華江國小',address:'臺北市萬華區華江國民小學',lat:25.0344321,lng:121.4922663,status:'注意事項',aliases:['萬華區華江國小'],isDemo:true,attention:'校內可能有其他廠商施工；進場車輛需避免互相阻擋，並依當日路權範圍作業。',
     records:[
-      {
-        id:'demo-r1',locationId:'demo-urban-banyan',title:'Level 2 基本樹木風險評估',
-        notes:'樹種：榕樹（Ficus microcarpa），胸高直徑 DBH 約 112 cm。以地面目視與木槌音診檢查根頸、主幹及主要枝條；西南側共優勢主幹可見夾皮，冠層另有約 8 cm 枯枝位於步道上方。目標物占用率評估為「頻繁」，本次初步風險等級為中度，建議先移除明顯枯枝，並於颱風季前完成進階檢測。',
-        imageUrls:['https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1000&q=82'],youtubeUrls:[],
-        fileUrls:['https://www.isa-arbor.com/Portals/0/Assets/PDF/Online-Learning/Sample%20Reports/TRAQ_Formal_Municipal_Report_L2.pdf?ver=2026-01-06-085406-580'],
-        authorName:'陳柏宇｜ISA Certified Arborist®／TRAQ',dateLabel:'展示 · 9 月 2 日'
-      },
-      {
-        id:'demo-r2',locationId:'demo-urban-banyan',title:'枯枝移除與減重修剪建議',
-        notes:'建議採冠層清理（crown cleaning）為主，保留健康活枝與自然樹形。所有切口應落在枝領外側，避免平切與截頂；單次活冠移除量控制在 10% 以內。夾皮主幹暫不直接移除，待音波斷層或其他進階檢測確認承載能力後再擬定風險緩解方案。',
-        imageUrls:[],youtubeUrls:[],fileUrls:['https://research.fs.usda.gov/download/treesearch/12602.pdf'],
-        authorName:'林書妍｜European Tree Worker（ETW）',dateLabel:'展示 · 9 月 3 日'
-      }
+      record('import-r03','import-huajiang',{dateLabel:'4/3',title:'吊車樹木修剪作業',crew:['白','陳','得','丸','鴻','橘','修'],meetingTime:'07:30',meetingPlace:'華江國小',mapUrl:'https://maps.app.goo.gl/BDyFvbikvofigeYo7',weather:'晴至多雲，約 25–30°C；多帶飲水，鋒面將至仍需帶雨具。',hospitalName:'臺大醫院',hospitalDistance:'4 公里',hospitalTravelTime:'15 分鐘',notes:'吊車 1 台、作業 1 天。',workDetails:'依現場計畫執行樹木修剪。',crane:'吊車 1 台／1 天',disposal:'夾子車：阿勻 15:00',parking:'車輛可停校內車格。',roadPermit:'4/3 無路權；路權僅有 4/4，馬路側作業不多。',safetyNotes:'校內另有廠商施工，車輛進場避免互相阻擋。'}),
+      record('import-r14','import-huajiang',{dateLabel:'5/11',title:'華江國小樹木作業',crew:['力','浩','白','陳','肯','誠','丸','鴻','橘','修','球','綺','庭'],meetingTime:'07:30',meetingPlace:'華江國小操場側門',mapUrl:'https://maps.app.goo.gl/7XQpMtxKnM5R6ho38',weather:'晴，24–28°C，炎熱；注意曝曬與補給。',notes:'由操場側門集合進場，依計畫執行當日樹木作業。',assignments:'力、浩為帶車／開場標記人員。',crane:'林大哥',disposal:'小夾：菘強 15:00',safetyNotes:'注意曝曬，備足飲水與補給。'})
     ]
   },
   {
-    id:'demo-campus-camphor',
-    name:'展示案例｜校園樟樹攀樹修剪',
-    address:'臺北市內湖區（示範座標）',
-    lat:25.0785,
-    lng:121.5796,
-    status:'進行中',
-    attention:'示範資料：上課時段禁止吊掛作業。作業前完成工具與繩索檢點、空中救援計畫及全員工作簡報。',
-    aliases:['樟樹','校園','攀樹','修剪','ETW','攀樹師'],
-    isDemo:true,
+    id:'import-nanmen',name:'南門國小',address:'臺北市中正區南門國民小學',lat:25.0347249,lng:121.5082312,status:'進行中',aliases:['台北市南門國小','廣州街8巷'],isDemo:true,attention:'由廣州街 8 巷側門進校停車；大茄苳需重心調整與拉纜，受保榕樹須謹慎施作。',
+    records:[record('import-r04','import-nanmen',{dateLabel:'9/29',title:'茄苳與榕樹重心調整',crew:['浩','陳','鴻','橘','白'],meetingTime:'07:30',meetingPlace:'廣州街 8 巷側門',mapUrl:'https://maps.app.goo.gl/9R83RucoYuizSokc6?g_st=ipc',weather:'炎熱，中午可達 35°C。',hospitalName:'臺北市立聯合醫院和平院區',hospitalDistance:'260 m',hospitalTravelTime:'1 分鐘',notes:'大茄苳、停車場榕樹及受保榕樹共 3 項樹冠管理作業。',workDetails:'1. 大茄苳 1 棵重心調整、拉纜作業。\n2. 停車場榕樹 1 棵重心大幅退縮。\n3. 受保榕樹人行道側樹冠提高。',assignments:'白負責開場；另有 stone 哥團隊。',disposal:'小夾清運。',parking:'廣州街 8 巷側門進校停車。',safetyNotes:'高溫補水；受保樹與人行道側作業須加強區隔。'})]
+  },
+  {
+    id:'import-luzhou-junior',name:'蘆洲國中公托幼兒園',address:'新北市蘆洲區中正路 265 號',lat:25.0863404,lng:121.4696,status:'注意事項',aliases:['蘆洲國中','公托幼兒園'],isDemo:true,attention:'依群組現場圖黃線行進，圓圈為卸裝備區、紅色區域為停車區；公裝存放於警衛室旁小房間。',
+    records:[record('import-r05','import-luzhou-junior',{dateLabel:'8/10',title:'榕樹局部退縮與微疏枝',crew:['肯','球','修','誠','浩','橘'],meetingTime:'07:30',meetingPlace:'蘆洲國中公托幼兒園',mapUrl:'https://maps.app.goo.gl/BqhmXwS2CWstvuwb8?g_st=ipc',weather:'晴時午後陣雨，降雨率 50%，體感最高 40°C。',hospitalName:'新北市立聯合醫院三重院區',hospitalDistance:'7.3 公里',hospitalTravelTime:'15 分鐘',notes:'榕樹局部退縮、微疏枝透光；全攀樹作業。',workDetails:'榕樹局部退縮與微疏枝透光，全程採攀樹方式作業。',disposal:'夾子車：1 小，14:00。',parking:'依群組現場圖黃線行進；圓圈卸裝備、紅色區域停車。',equipment:'公裝除電池外，均放在警衛室旁小房間；請早班警衛開正門捲門後整車拖出。',safetyNotes:'請智誠多帶一個保冷袋；午後雷陣雨與高體感溫度需加強補水及防雨。'})]
+  },
+  {
+    id:'import-daye',name:'大業國小',address:'桃園市大業國民小學',lat:25.006748,lng:121.31579,status:'進行中',aliases:['ETW大業國小'],isDemo:true,attention:'優先進行 ETW 作業；若有多餘時間才安排部分攀爬。週一尚有半天上課，堆置區不得影響學生活動。',
+    records:[record('import-r06','import-daye',{dateLabel:'1/19',title:'ETW 優先作業與攀爬預備',crew:['白','浩','陳','得','肯','誠','丸','鴻','橘','儀','韻','球','修','庭','歐'],meetingTime:'07:30',meetingPlace:'民光東路側門內停車，使用一年六班教室',mapUrl:'https://maps.app.goo.gl/tLqZKp3dNiqsBRnw6?g_st=com.google.maps.preview.copy',weather:'多雲至陰，注意保暖。',hospitalName:'桃園榮民總醫院',hospitalDistance:'1.5 公里',hospitalTravelTime:'7 分鐘',notes:'當天說明，先以 ETW 為主；如有餘裕再做部分攀爬工作，可先參考計畫書。',workDetails:'ETW 項目優先，部分攀爬工作視進度安排。',disposal:'堆置在不影響學生活動的區域。',parking:'民光東路側門內停車。',equipment:'全員攜帶自己的攀爬裝備與 PPE。',safetyNotes:'週一仍有半天上課；歐為素食。'})]
+  },
+  {
+    id:'import-chengzhou',name:'成州國小',address:'新北市五股區成州國民小學',lat:25.0997414,lng:121.4506619,status:'注意事項',aliases:['五股成州國小'],isDemo:true,attention:'校園可能仍有師生活動；圍牆外吊車作業與內側攀樹區須完整隔離。',
+    records:[record('import-r07','import-chengzhou',{dateLabel:'11/30',title:'圍牆外吊車退縮與內側疏枝',crew:['陳','誠','修','鴻','橘'],meetingTime:'07:30',meetingPlace:'學校大門口',mapUrl:'https://maps.app.goo.gl/48WzczHGRsdhBkP98',weather:'晴、涼冷。',hospitalName:'新北市立聯合醫院三重院區',hospitalDistance:'8 公里',hospitalTravelTime:'20 分鐘',notes:'圍牆外使用吊車退縮，內側採攀樹疏枝。',workDetails:'吊車處理圍牆外樹冠退縮，校內側由攀樹人員疏枝。',crane:'圍牆外吊車作業。',disposal:'小夾 14:30。',equipment:'三角錐、警示帶、施工改道牌。',safetyNotes:'注意學校是否有師生活動，完整封閉施工及落枝區域。'})]
+  },
+  {
+    id:'import-guangfu',name:'光復國小（中和）',address:'新北市中和區光復國民小學',lat:25.0151637,lng:121.4831365,status:'注意事項',aliases:['新北市光復國小','光復國小'],isDemo:true,attention:'校內作業須配合師生活動；雨天可能有強降雨或雷雨，攀樹、吊車及地面分組依現場調整。',
     records:[
-      {
-        id:'demo-r3',locationId:'demo-campus-camphor',title:'攀登前檢查與工作定位設定',
-        notes:'完成樹體 360° 地面檢查，確認無明顯懸掛枝與蜂巢。主錨點設於健全主枝分叉上方，使用雙繩系統進入樹冠；作業鏈鋸啟用前維持第二獨立固定點。地面組已確認救援繩、急救箱與通訊口令，並完成繩索、鉤環、吊帶及安全帽的逐項檢查。',
-        imageUrls:['https://images.unsplash.com/photo-1511497584788-876760111969?auto=format&fit=crop&w=1000&q=82'],
-        youtubeUrls:['https://www.youtube.com/watch?v=MHgnaP6o1kI'],
-        fileUrls:['https://www.isa-arbor.com/Portals/0/Assets/PDF/Certification/Outline_ISA_Cerified-Tree-Worker_2024.pdf?ver=2024-02-06-143200-427'],
-        authorName:'王志遠｜ISA Certified Tree Climber®',dateLabel:'展示 · 8 月 29 日'
-      },
-      {
-        id:'demo-r4',locationId:'demo-campus-camphor',title:'冠層清理與建築側淨空',
-        notes:'移除枯死、斷裂及互相摩擦枝，東側建築物外牆維持約 1.5 m 淨空。修剪以小切口分散處理，未進行截頂；直徑較大的枝條採三刀法與控制式吊掛，避免撕裂樹皮或讓枝段自由落下。完工後保留足夠葉面積供樹體恢復。',
-        imageUrls:[],youtubeUrls:[],fileUrls:[],
-        authorName:'林書妍｜European Tree Worker（ETW）',dateLabel:'展示 · 8 月 30 日'
-      }
+      record('import-r08','import-guangfu',{dateLabel:'9/22',title:'植栽修剪整理',crew:['陳','誠','丸','鴻','橘','修','庭'],meetingTime:'07:30',meetingPlace:'校門內停車',mapUrl:'https://maps.app.goo.gl/wuJpmYo5nXsMMmAq9',weather:'整天有陣雨或雷雨，可能強降雨；請備雨衣、雨傘及替換衣物。',hospitalName:'雙和醫院',hospitalDistance:'3.5 公里',hospitalTravelTime:'10 分鐘',notes:'校園植栽修剪整理。',workDetails:'依現場植栽狀況進行修剪、整理與集運。',parking:'校門內停車。',equipment:'太空包、高枝剪、自帶剪定鋏。',safetyNotes:'雷雨或強降雨時停止高空作業。'}),
+      record('import-r13','import-guangfu',{dateLabel:'7/7（日）',title:'樹木修剪及花台修整',crew:['白','丸','肯','誠','鴻','橘','修'],meetingTime:'07:30',meetingPlace:'光復國小',mapUrl:'https://maps.app.goo.gl/3jdhtbRQLys2Sk9dA?g_st=com.google.maps.preview.copy',notes:'新北市光復國小樹木修剪及花台修整作業。',workDetails:'依吊車、花台、牆上榕三組同步推進。',assignments:'吊車組：丸、肯、修。\n花台組：白、橘（推車、太空包）。\n牆上榕組：誠、鴻（推車、太空包）。',equipment:'推車、太空包。',safetyNotes:'各組維持通訊並劃分吊車與地面作業動線。'})
     ]
   },
   {
-    id:'demo-storm-rain-tree',
-    name:'展示案例｜社區雨豆樹風災處置',
-    address:'新北市板橋區（示範座標）',
-    lat:25.0114,
-    lng:121.4618,
-    status:'注意事項',
-    attention:'示範資料：北側主枝有新鮮裂縫，下方停車格暫停使用；在完成風險緩解前不得移除警戒帶。',
-    aliases:['雨豆樹','風災','裂枝','吊掛','rigging'],
-    isDemo:true,
-    records:[
-      {
-        id:'demo-r5',locationId:'demo-storm-rain-tree',title:'颱風後緊急巡查',
-        notes:'北側主枝基部出現約 65 cm 縱向裂縫，裂縫下方為固定停車位。已先將目標區隔離，並以望遠鏡確認冠層另有兩支懸掛枝。考量目標物占用與失效後果，建議在 24 小時內由合格攀樹人員優先移除懸掛枝，再評估裂枝減重或移除方案。',
-        imageUrls:['https://images.unsplash.com/photo-1473448912268-2022ce9509d8?auto=format&fit=crop&w=1000&q=82'],youtubeUrls:[],fileUrls:[],
-        authorName:'陳柏宇｜ISA Certified Arborist®／TRAQ',dateLabel:'展示 · 8 月 18 日'
-      },
-      {
-        id:'demo-r6',locationId:'demo-storm-rain-tree',title:'控制式吊掛移除完成',
-        notes:'先以高位導向點與摩擦制動器建立吊掛系統，分段降低懸掛枝，避免衝擊主幹與鋪面。裂枝側完成約 12% 末端減重，未改變主幹連結。建議 3 個月後及下一次強風事件後複查裂縫變化，並以相同角度照片追蹤。',
-        imageUrls:[],youtubeUrls:[],fileUrls:[],
-        authorName:'王志遠｜ISA Certified Tree Climber®',dateLabel:'展示 · 8 月 19 日'
-      }
-    ]
+    id:'import-linkou',name:'林口國小',address:'新北市林口區林口國民小學',lat:25.0797104,lng:121.3899638,status:'注意事項',aliases:['林口路68巷'],isDemo:true,attention:'當日需完成林口路 68 巷路權範圍；約 90% 為吊車作業，未完成部分可於隔日預備日繼續。',
+    records:[record('import-r09','import-linkou',{dateLabel:'8/15',title:'林口路 68 巷吊車作業',crew:['浩','力','得','陳','誠','肯','球','修'],meetingTime:'07:30',meetingPlace:'林口國小作業點',mapUrl:'https://maps.app.goo.gl/zNH9cxcXd4RZN8Pk7?g_st=com.google.maps.preview.copy',weather:'多雲至陰、悶熱，午後降雨機率高。',hospitalName:'林口長庚醫院',hospitalDistance:'4 公里',hospitalTravelTime:'18 分鐘',notes:'90% 為吊車作業，2 台吊車進場 1 天。',workDetails:'優先完成林口路 68 巷路權範圍，若未完成可於隔日預備日續作。',assignments:'浩為帶隊／開場標記人員。',crane:'2 台吊車／1 天。',disposal:'大夾：阿宏 15:00。',roadPermit:'當日需完成林口路 68 巷路權範圍。',safetyNotes:'悶熱與午後降雨機率高，吊車作業依天候調整。'})]
   },
   {
-    id:'demo-construction-protection',
-    name:'展示案例｜工地樹木保護區',
-    address:'臺中市西屯區（示範座標）',
-    lat:24.1813,
-    lng:120.6468,
-    status:'施工中',
-    attention:'示範資料：樹木保護區內禁止堆料、停車、洗車與改變土壤高程；根系附近開挖須由樹藝師現場監看。',
-    aliases:['工地','根系','樹木保護','TPZ','開挖'],
-    isDemo:true,
-    records:[
-      {
-        id:'demo-r7',locationId:'demo-construction-protection',title:'施工前樹況與根域基準記錄',
-        notes:'完成樹幹、根頸、冠幅與鄰近鋪面拍攝，建立施工前基準。依現場條件劃設樹木保護區（TPZ），圍籬固定於保護區外緣；主要根域鋪設約 8 cm 木屑覆蓋並增設臨時承壓板，降低施工機具造成土壤壓實。',
-        imageUrls:['https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1000&q=82'],youtubeUrls:[],fileUrls:[],
-        authorName:'張雅雯｜ISA Certified Arborist®',dateLabel:'展示 · 8 月 12 日'
-      },
-      {
-        id:'demo-r8',locationId:'demo-construction-protection',title:'管線試掘現場監看',
-        notes:'採人工與氣動挖掘方式確認根系位置；發現直徑約 6 cm 結構根後立即停止向樹幹方向開挖，並將管線路徑外移 80 cm。暴露細根以濕麻布覆蓋，當日完成回填與澆灌。後續每兩週檢查葉色、枝梢回枯與土壤含水狀況。',
-        imageUrls:[],youtubeUrls:[],fileUrls:[],
-        authorName:'張雅雯｜ISA Certified Arborist®',dateLabel:'展示 · 8 月 15 日'
-      }
-    ]
+    id:'import-shanding',name:'山頂國小',address:'桃園市龜山區山頂國民小學',lat:24.99179,lng:121.32723,status:'注意事項',aliases:['桃園山頂國小'],isDemo:true,attention:'白千層下方有水溝蓋施工，需再評估作業安全；大夾進入前先協調側門對面車輛移車。',
+    records:[record('import-r10','import-shanding',{dateLabel:'8/14',title:'颱風折損樹與校園修剪',crew:['力','陳','得','浩','肯','誠','球','修'],meetingTime:'07:30',meetingPlace:'山頂國小',mapUrl:'https://maps.app.goo.gl/2EAprJzkYYWwUH7S6',hospitalName:'桃園榮民總醫院',hospitalPhone:'03-2868001',hospitalDistance:'1.9 公里',hospitalTravelTime:'9 分鐘',notes:'依計畫書修剪，另有 4 項現場重點。',workDetails:'1. 水柳颱風後折斷，改為全株伐除。\n2. 司令台旁白千層下方有水溝蓋施工，先評估安全。\n3. 後方化糞池有上次修剪枝條，需一併清運。\n4. 大夾進入前協調側門對面車輛移車。',assignments:'力、陳為帶車／開場標記人員；無線電由小陳（湧霖）準備。',crane:'展哥，半天。',disposal:'大夾：阿宏 15:00。',equipment:'角錐、吊車鏈鋸板、高枝鋸、高枝剪、無線電、拖樹枝廢繩。',safetyNotes:'水溝蓋施工區未確認安全前不得進行上方作業。'})]
   },
   {
-    id:'demo-veteran-camphor',
-    name:'展示案例｜老樟樹年度健檢',
-    address:'新竹市東區（示範座標）',
-    lat:24.8017,
-    lng:120.9715,
-    status:'已完成',
-    attention:'示範資料：樹洞為潛在野生動物棲地，檢查及修剪前先確認無鳥巢或其他動物活動。',
-    aliases:['老樹','樟樹','年度健檢','音波斷層','生態棲地'],
-    isDemo:true,
+    id:'import-luchang',name:'鷺江國小',address:'新北市蘆洲區民族路 7 號',lat:25.0851574,lng:121.4770857,status:'注意事項',aliases:['民權路側門','中東海棗側門'],isDemo:true,attention:'民權路與中東海棗側門各有遙控器；中東海棗作業期間側門車輛無法進出，四維樓施工區須完全封閉。',
+    records:[record('import-r11','import-luchang',{dateLabel:'日期待確認',title:'吊車修剪與校園動線管制',crew:['力','得','浩','陳','肯','誠','橘','庭'],meetingTime:'07:30',meetingPlace:'民權路側門',mapUrl:'https://maps.app.goo.gl/s5RvD7BFYKnsdHYX6?g_st=com.google.maps.preview.copy',hospitalName:'三重醫院',hospitalPhone:'02-29829111',hospitalDistance:'4.1 公里',hospitalTravelTime:'待確認',notes:'警衛 06:00 上班；簡組長已交接民權路側門與中東海棗側門兩個遙控器。',workDetails:'1. 中東海棗 10–14 棵由騰信安排修剪，本組集中與清運。\n2. 中東海棗側門車輛無法進出。\n3. 大王椰子下方無遮擋且易傷行人，必要時上綁帶。\n4. 四維樓小葉欖仁一樓有學生上課，施工區完全封閉。\n5. 吊車作業後若有時間，由場控安排 2 人至蘆洲國中修剪大王椰子（不清運）。',crane:'展哥，1 天。',disposal:'大夾：阿祐 15:30。',equipment:'警示帶、綁帶組、吊車鏈鋸板、防刺手套。',safetyNotes:'四維樓使用警示帶完全封閉；大王椰子下方強化行人管制。'})]
+  },
+  {
+    id:'import-wuxing',name:'吳興街 220 巷案場',address:'臺北市信義區吳興街 220 巷 11 弄',lat:25.028068,lng:121.562239,status:'注意事項',aliases:['吳興街','220巷11弄'],isDemo:true,attention:'可先到工作點卸裝備，再移至附近停車場或路邊停車；拉運樹枝距離約 30 公尺。',
+    records:[record('import-r12','import-wuxing',{dateLabel:'7/12',title:'修剪 5 棵、伐除 1 棵',crew:[],meetingTime:'預計 07:30，待確認',meetingPlace:'吳興街 220 巷 11 弄工作點',mapUrl:'https://maps.app.goo.gl/LQ1enonctDpa6ouG9',weather:'多雲悶熱，午後降雨機率 40%。',hospitalName:'臺北醫學大學附設醫院',hospitalDistance:'鄰近案場',hospitalTravelTime:'步行可達',notes:'修剪 5 棵、伐除 1 棵；樹枝需拉運約 30 公尺，由同業清運。',workDetails:'完成 5 棵修剪與 1 棵伐除，枝材集中後交由同業清運。',disposal:'同業清運；拉運樹枝約 30 公尺。',parking:'先於工作點卸裝備，再到附近停車場或路邊停車。',equipment:'角錐、馬刺、Rigging。',safetyNotes:'午後可能降雨，注意悶熱、補水及巷弄人車動線。'})]
+  },
+  {
+    id:'import-qiming',name:'臺北市立啟明學校',address:'臺北市士林區忠誠路二段 207 巷 1 號',lat:25.1174818,lng:121.5347347,status:'注意事項',aliases:['啟明學校'],isDemo:true,attention:'兩日施工且天候不穩。開車卸裝備者先至指定卸貨點，完成後再至主集合點停車；暴雨時先整理地面。',
     records:[
-      {
-        id:'demo-r9',locationId:'demo-veteran-camphor',title:'年度樹勢與結構複查',
-        notes:'與去年固定照片比對，冠層密度與葉色大致穩定；主幹東側舊傷口持續形成癒合組織，未見新裂縫。根頸周圍覆土已移除，可見根張發育正常。樹洞開口附近有新鮮糞便與羽毛，先列為棲地保留區，不做封填。',
-        imageUrls:['https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1000&q=82'],youtubeUrls:[],fileUrls:[],
-        authorName:'周子涵｜European Tree Technician（ETT）',dateLabel:'展示 · 7 月 26 日'
-      },
-      {
-        id:'demo-r10',locationId:'demo-veteran-camphor',title:'年度管理建議',
-        notes:'維持目前低干預策略：移除步道上方新生枯枝、補充有機覆蓋物但避開根頸，乾季依土壤含水狀況深層澆灌。若主幹舊傷出現裂縫擴大、真菌子實體或冠梢快速回枯，再安排音波斷層等進階檢測。下次例行複查排定 12 個月後。',
-        imageUrls:[],youtubeUrls:[],fileUrls:['https://www.isa-arbor.com/Online-Learning/More-Resources/Sample-Reports'],
-        authorName:'周子涵｜European Tree Technician（ETT）',dateLabel:'展示 · 7 月 27 日'
-      }
+      record('import-r15a','import-qiming',{dateLabel:'第一天',title:'啟明學校兩日施工｜第一天',crew:['得','丸','斌','庭','薛','修','康'],meetingTime:'07:30',meetingPlace:'啟明學校主集合點',mapUrl:'https://maps.app.goo.gl/9fq3jAZBP9WpJsp97?g_st=ic',weather:'陰雨、豪雨，天氣不穩；準備外套及雨具。',hospitalName:'振興醫院',hospitalDistance:'2.4 公里',hospitalTravelTime:'9 分鐘',notes:'第一天進場，吊車預計 07:30–08:00 到場。',workDetails:'依兩日施工時程推進；雨勢過大時停止高空作業。',assignments:'得、丸、斌攜帶攀樹器材；庭、薛、修、康支援地面及現場分工。',crane:'07:30–08:00 之間進場。',parking:'開車且需卸裝備者先至 https://maps.app.goo.gl/cTHw5vztCXA5wyJR7?g_st=ic，07:00 卸裝備後回主定位點停車；機車直接到主集合點。',equipment:'攀樹器材、外套、雨具。',safetyNotes:'豪雨或雷雨時暫停高空與吊掛作業。'}),
+      record('import-r15b','import-qiming',{dateLabel:'第二天',title:'啟明學校兩日施工｜第二天',crew:['斌','鴻','橘','綺','得','修','方','誠'],meetingTime:'07:30',meetingPlace:'啟明學校主集合點',mapUrl:'https://maps.app.goo.gl/9fq3jAZBP9WpJsp97?g_st=ic',weather:'雨。',hospitalName:'振興醫院',hospitalDistance:'2.4 公里',hospitalTravelTime:'9 分鐘',notes:'第二天持續施工；若下暴雨，先整理地面，待雨勢減弱再上樹。',workDetails:'依第一天進度續作；雨勢大時轉做地面整理，雨勢轉小且裝備與人員狀況安全後再恢復攀樹。',assignments:'斌、鴻、橘、綺、得攜帶攀樹裝備；修、方、誠支援。',parking:'沿用第一天主集合點及卸裝備動線。',equipment:'多帶幾件雨衣與替換衣褲；現場備吹風機供人員乾燥使用。',safetyNotes:'避免濕冷與失溫；重新上樹前檢查繩索、PPE 與踩點狀況。'})
     ]
   }
 ];
