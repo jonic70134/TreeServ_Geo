@@ -7,7 +7,7 @@ service cloud.firestore {
     }
 
     function isOwner() {
-      return signedIn() && request.auth.token.email == 'jonic70134@gmail.com';
+      return signedIn() && request.auth.token.email_verified == true && request.auth.token.email == 'jonic70134@gmail.com';
     }
 
     // Authenticated accounts default to user. A future custom `role` claim can
@@ -29,9 +29,79 @@ service cloud.firestore {
 
     match /workRecords/{recordId} {
       allow read: if true;
-      allow create: if canWrite() && request.resource.data.authorId == request.auth.uid;
-      allow update: if isOwner() || (canWrite() && resource.data.authorId == request.auth.uid && request.resource.data.authorId == resource.data.authorId);
-      allow delete: if isOwner();
+      allow create: if canWrite() && request.resource.data.authorId == request.auth.uid && (
+        validRecordAudit(recordId, 'create') ||
+        (isOwner() && request.resource.data.sourceImported == true && validRecordAudit(recordId, 'update'))
+      );
+      allow update: if (isOwner() || (canWrite() && resource.data.authorId == request.auth.uid))
+        && request.resource.data.authorId == resource.data.authorId
+        && request.resource.data.authorName == resource.data.authorName
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.locationId == resource.data.locationId
+        && validRecordAudit(recordId, 'update');
+      allow delete: if isOwner()
+        && getAfter(/databases/$(database)/documents/recordDeletions/$(recordId)).data.timestamp == request.time
+        && getAfter(/databases/$(database)/documents/recordDeletions/$(recordId)).data.actorId == request.auth.uid;
+    }
+
+    function validRecordAudit(recordId, action) {
+      let auditId = request.resource.data.lastAuditId;
+      let entry = getAfter(/databases/$(database)/documents/activityLogs/$(auditId)).data;
+      return !exists(/databases/$(database)/documents/activityLogs/$(auditId))
+        && entry.actorId == request.auth.uid && entry.action == action
+        && entry.recordId == recordId && entry.timestamp == request.time;
+    }
+
+    function validActivity() {
+      let entry = request.resource.data;
+      return signedIn()
+        && entry.keys().hasOnly(['actorId', 'actorEmail', 'actorName', 'action', 'recordId', 'recordTitle', 'timestamp'])
+        && entry.actorId == request.auth.uid && entry.actorEmail == request.auth.token.email
+        && entry.actorName is string && entry.recordTitle is string && entry.recordId is string
+        && entry.timestamp == request.time;
+    }
+
+    match /activityLogs/{entryId} {
+      allow read: if isOwner();
+      allow create: if validActivity() && (
+        (request.resource.data.action in ['login', 'logout'] && request.resource.data.recordId == '') ||
+        (request.resource.data.action == 'edit'
+          && (isOwner() || get(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId)).data.authorId == request.auth.uid)) ||
+        (request.resource.data.action in ['create', 'update']
+          && getAfter(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId)).data.lastAuditId == entryId
+          && getAfter(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId)).data.updatedAt == request.time) ||
+        (request.resource.data.action == 'delete' && isOwner()
+          && getAfter(/databases/$(database)/documents/recordDeletions/$(request.resource.data.recordId)).data.auditId == entryId
+          && (exists(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId))
+            || getAfter(/databases/$(database)/documents/importedRecordStates/$(request.resource.data.recordId)).data.deleted == true)
+          && !existsAfter(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId)))
+      );
+      allow update, delete: if false;
+    }
+
+    match /recordDeletions/{recordId} {
+      allow read: if isOwner();
+      allow create: if isOwner()
+        && request.resource.data.actorId == request.auth.uid
+        && request.resource.data.recordId == recordId
+        && request.resource.data.timestamp == request.time
+        && getAfter(/databases/$(database)/documents/activityLogs/$(request.resource.data.auditId)).data.action == 'delete'
+        && getAfter(/databases/$(database)/documents/activityLogs/$(request.resource.data.auditId)).data.recordId == recordId
+        && (exists(/databases/$(database)/documents/workRecords/$(recordId))
+          || getAfter(/databases/$(database)/documents/importedRecordStates/$(recordId)).data.deleted == true)
+        && !existsAfter(/databases/$(database)/documents/workRecords/$(recordId));
+      allow update, delete: if false;
+    }
+
+    // Public deletion markers contain no account identity or operation details.
+    match /importedRecordStates/{recordId} {
+      allow read: if true;
+      allow create: if isOwner()
+        && request.resource.data.keys().hasOnly(['deleted', 'updatedAt', 'auditId'])
+        && request.resource.data.deleted == true && request.resource.data.updatedAt == request.time
+        && getAfter(/databases/$(database)/documents/activityLogs/$(request.resource.data.auditId)).data.action == 'delete'
+        && getAfter(/databases/$(database)/documents/activityLogs/$(request.resource.data.auditId)).data.recordId == recordId;
+      allow update, delete: if false;
     }
 
     match /users/{userId} {
