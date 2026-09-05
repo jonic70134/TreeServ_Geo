@@ -1,6 +1,6 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User } from 'firebase/auth';
-import { addDoc, collection, deleteDoc, doc, getFirestore, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getFirestore, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, writeBatch, limit, getDocs, startAfter, type QueryDocumentSnapshot } from 'firebase/firestore';
 import { getRuntimeConfig } from './runtime-config';
 
 const config = getRuntimeConfig()?.firebase ?? {
@@ -17,11 +17,20 @@ const app = firebaseReady ? (getApps()[0] ?? initializeApp(config)) : null;
 export const auth = app ? getAuth(app) : null;
 export const db = app ? getFirestore(app) : null;
 export const ownerEmail = 'jonic70134@gmail.com';
-export const userRole = (user: User | null) => user?.email?.toLowerCase() === ownerEmail ? 'owner' : user ? 'user' : 'guest';
+export const userRole = (user: User | null) => user?.emailVerified && user.email === ownerEmail ? 'owner' : user ? 'user' : 'guest';
 
 export async function googleSignIn() {
   if (!auth) throw new Error('Firebase 尚未設定');
   await signInWithPopup(auth, new GoogleAuthProvider());
 }
 
-export { signOut, onAuthStateChanged, addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc };
+export type AuditAction = 'login' | 'logout' | 'create' | 'edit' | 'update' | 'delete';
+export function auditData(account: User, action: AuditAction, recordId = '', recordTitle = '') {
+  return { actorId: account.uid, actorEmail: account.email || '', actorName: account.displayName || '', action, recordId, recordTitle, timestamp: serverTimestamp() };
+}
+export async function logActivity(account: User, action: AuditAction, recordId = '', recordTitle = '') {
+  if (!db) return;
+  await addDoc(collection(db, 'activityLogs'), auditData(account, action, recordId, recordTitle));
+}
+export { signOut, onAuthStateChanged, addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, writeBatch, limit, getDocs, startAfter };
+export type { QueryDocumentSnapshot };
