@@ -29,7 +29,10 @@ service cloud.firestore {
 
     match /workRecords/{recordId} {
       allow read: if true;
-      allow create: if canWrite() && request.resource.data.authorId == request.auth.uid && validRecordAudit(recordId, 'create');
+      allow create: if canWrite() && request.resource.data.authorId == request.auth.uid && (
+        validRecordAudit(recordId, 'create') ||
+        (isOwner() && request.resource.data.sourceImported == true && validRecordAudit(recordId, 'update'))
+      );
       allow update: if (isOwner() || (canWrite() && resource.data.authorId == request.auth.uid))
         && request.resource.data.authorId == resource.data.authorId
         && request.resource.data.authorName == resource.data.authorName
@@ -69,7 +72,8 @@ service cloud.firestore {
           && getAfter(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId)).data.updatedAt == request.time) ||
         (request.resource.data.action == 'delete' && isOwner()
           && getAfter(/databases/$(database)/documents/recordDeletions/$(request.resource.data.recordId)).data.auditId == entryId
-          && exists(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId))
+          && (exists(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId))
+            || getAfter(/databases/$(database)/documents/importedRecordStates/$(request.resource.data.recordId)).data.deleted == true)
           && !existsAfter(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId)))
       );
       allow update, delete: if false;
@@ -83,8 +87,20 @@ service cloud.firestore {
         && request.resource.data.timestamp == request.time
         && getAfter(/databases/$(database)/documents/activityLogs/$(request.resource.data.auditId)).data.action == 'delete'
         && getAfter(/databases/$(database)/documents/activityLogs/$(request.resource.data.auditId)).data.recordId == recordId
-        && exists(/databases/$(database)/documents/workRecords/$(recordId))
+        && (exists(/databases/$(database)/documents/workRecords/$(recordId))
+          || getAfter(/databases/$(database)/documents/importedRecordStates/$(recordId)).data.deleted == true)
         && !existsAfter(/databases/$(database)/documents/workRecords/$(recordId));
+      allow update, delete: if false;
+    }
+
+    // Public deletion markers contain no account identity or operation details.
+    match /importedRecordStates/{recordId} {
+      allow read: if true;
+      allow create: if isOwner()
+        && request.resource.data.keys().hasOnly(['deleted', 'updatedAt', 'auditId'])
+        && request.resource.data.deleted == true && request.resource.data.updatedAt == request.time
+        && getAfter(/databases/$(database)/documents/activityLogs/$(request.resource.data.auditId)).data.action == 'delete'
+        && getAfter(/databases/$(database)/documents/activityLogs/$(request.resource.data.auditId)).data.recordId == recordId;
       allow update, delete: if false;
     }
 

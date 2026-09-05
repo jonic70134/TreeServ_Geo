@@ -79,3 +79,24 @@ test('unverified owner email cannot gain owner access', async () => {
   const unverified = env.authenticatedContext('unverified', { email: identity.owner, email_verified: false }).firestore();
   await assertFails(getDocs(collection(unverified, 'activityLogs')));
 });
+test('owner can persist edits to an imported static record, members cannot', async () => {
+  async function persist(db, uid, id) {
+    const batch=writeBatch(db), audit=doc(collection(db,'activityLogs'));
+    batch.set(doc(db,'workRecords',id),{authorId:uid,authorName:'Original imported author',locationId:'import-site',sourceImported:true,createdAt:serverTimestamp(),updatedAt:serverTimestamp(),lastAuditId:audit.id,notes:'Updated imported work'});
+    batch.set(audit,entry(uid,'update',id));
+    return batch.commit();
+  }
+  await assertSucceeds(persist(owner,'owner','import-record'));
+  await assertFails(persist(member,'member','import-not-owner'));
+});
+test('deleting an unpersisted import is logged and leaves a public identity-free marker', async () => {
+  const batch=writeBatch(owner), audit=doc(collection(owner,'activityLogs'));
+  batch.set(doc(owner,'importedRecordStates','import-delete'),{deleted:true,updatedAt:serverTimestamp(),auditId:audit.id});
+  batch.set(doc(owner,'recordDeletions','import-delete'),{...entry('owner','delete','import-delete'),auditId:audit.id});
+  batch.set(audit,entry('owner','delete','import-delete'));
+  await assertSucceeds(batch.commit());
+  const marker=(await assertSucceeds(getDoc(doc(guest,'importedRecordStates','import-delete')))).data();
+  assert.equal(marker.deleted,true);
+  assert.equal(marker.actorEmail,undefined);
+  await assertFails(setDoc(doc(member,'importedRecordStates','illegal'),{deleted:true,updatedAt:serverTimestamp(),auditId:'fake'}));
+});
