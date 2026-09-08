@@ -65,6 +65,7 @@ service cloud.firestore {
       allow read: if isOwner();
       allow create: if validActivity() && (
         (request.resource.data.action in ['login', 'logout'] && request.resource.data.recordId == '') ||
+        (request.resource.data.action in ['plan_image_save', 'plan_pdf_save'] && isOwner() && request.resource.data.recordId == '') ||
         (request.resource.data.action == 'edit'
           && (isOwner() || get(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId)).data.authorId == request.auth.uid)) ||
         (request.resource.data.action in ['create', 'update']

@@ -8,6 +8,8 @@ TreeServ Geo 是以地圖為中心的案場工作紀錄系統。前端主要介�
 - 每筆工作紀錄可保存 A → 途經點 → B 手動進場路線、方向箭頭與進場說明；點選路線後可拖曳調整，最多 100 點
 - Owner 可編輯及刪除所有工作紀錄；User 僅可編輯本人紀錄。更新及刪除皆需再次確認，更新保留原作者
 - Owner 專用登入與操作紀錄頁，按時間倒序，每次載入 50 筆，以台灣時間顯示至秒
+- Owner 專用修剪計畫書工作頁，整理人事時地物、業主需求、聯絡窗口與現場限制
+- 現場照片可使用畫筆、弧線、方向箭頭與圈選工具標註；圖面與計畫書 PDF 可分別保存到指定的 Google Drive 專案資料夾
 - 已記錄地點的即時搜尋與 autocomplete
 - 地點注意事項及歷史工作時間軸
 - 文字、圖片 URL、YouTube 嵌入與檔案 URL
@@ -28,7 +30,7 @@ TreeServ Geo 是以地圖為中心的案場工作紀錄系統。前端主要介�
 - `locations/{locationId}`：名稱、地址、座標、狀態、注意事項、別名與建立者。
 - `workRecords/{recordId}`：地點 ID、文字內容、圖片 URL、YouTube URL、檔案 URL、作者與時間。
 - `users/{uid}`：預留角色與個人資料；一般登入帳號預設為 user。
-- `activityLogs/{id}`：帳號、登入／登出／開啟編輯／建立／更新／刪除事件及伺服器時間。僅 Owner 可讀，客戶端無法修改或刪除。
+- `activityLogs/{id}`：帳號、登入／登出／開啟編輯／建立／更新／刪除及計畫圖面／PDF 儲存事件與伺服器時間。僅 Owner 可讀，客戶端無法修改或刪除。
 - `recordDeletions/{recordId}`：刪除的稽核收據，與工作紀錄刪除及操作紀錄以同一批次提交；不保留完整紀錄內容，不能用於還原。
 - `importedRecordStates/{recordId}`：匯入紀錄的刪除標記，讓所有裝置持續隱藏已刪除的匯入項目；不含帳號資料。原始匯入素材仍留在程式來源。
 
@@ -45,6 +47,12 @@ TreeServ Geo 是以地圖為中心的案場工作紀錄系統。前端主要介�
 ## Google Maps 設定
 
 在 Google Cloud 啟用 **Maps JavaScript API** 與 **Geocoding API**，把瀏覽器金鑰填入 `VITE_GOOGLE_MAPS_API_KEY`。建議將金鑰限制為正式網站網域，並限制只可呼叫這兩項 API。可另填 `VITE_GOOGLE_MAP_ID` 套用自訂地圖樣式。
+
+## Google Drive 計畫書存檔
+
+Google Drive API 必須在 Firebase 所屬的 Google Cloud 專案啟用。Owner 在計畫書頁按下「連接 Google Drive」後，網站以 Firebase Google 登入要求 `drive.file` 權限；此權限只允許 TreeServ Geo 存取由它建立或開啟的檔案，不會讀取整個雲端硬碟。
+
+計畫書頁會依輸入的資料夾名稱尋找由 TreeServ Geo 建立的資料夾，找不到時在「我的雲端硬碟」建立。標註圖片與 PDF 保持 Google Drive 的預設限制存取，不會建立「知道連結的任何人」權限；回傳的 `webViewLink` 仍需使用獲授權的 Google 帳號登入。
 
 ## 本機開發
 
