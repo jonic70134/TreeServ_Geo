@@ -6,7 +6,7 @@ const busy = ref(false);
 const error = ref('');
 const more = ref(true);
 let cursor: QueryDocumentSnapshot | undefined;
-const labels: Record<string, string> = { login: '登入', logout: '登出', create: '建立紀錄', edit: '開啟編輯', update: '更新紀錄', delete: '刪除紀錄' };
+const labels: Record<string, string> = { login: '登入', logout: '登出', create: '建立紀錄', edit: '開啟編輯', update: '更新紀錄', delete: '刪除紀錄', plan_image_save: '儲存計畫圖面', plan_pdf_save: '儲存計畫書 PDF' };
 function formatTime(value: any) {
   return value?.toDate ? new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(value.toDate()) : '時間同步中';
 }
@@ -25,7 +25,7 @@ onMounted(() => load(true));
 <template>
   <section class="audit-page">
     <div class="audit-heading"><div><h1>登入與操作紀錄</h1><p>台灣時間（UTC+8）・每次載入 50 筆</p></div><button :disabled="busy" @click="load(true)">重新整理</button></div>
-    <p>「開啟編輯」表示進入編輯畫面；「更新紀錄」表示變更已成功儲存。此頁保留啟用後的紀錄。</p>
+    <p>「開啟編輯」表示進入編輯畫面；更新、刪除、計畫圖面與 PDF 儲存成功後都會留下紀錄。此頁保留啟用後的紀錄。</p>
     <p v-if="error" role="alert">{{ error }}</p>
     <div class="audit-table"><table><thead><tr><th>時間（年月日時分秒）</th><th>登入者</th><th>操作</th><th>工作紀錄</th></tr></thead><tbody><tr v-for="entry in entries" :key="entry.id"><td>{{ formatTime(entry.timestamp) }}</td><td>{{ entry.actorName }}<br>{{ entry.actorEmail }}</td><td>{{ labels[entry.action] || entry.action }}</td><td>{{ entry.recordTitle || '—' }}<small v-if="entry.recordId">{{ entry.recordId }}</small></td></tr></tbody></table></div>
     <p v-if="!entries.length && !busy && !error">尚無登入或操作紀錄。</p>

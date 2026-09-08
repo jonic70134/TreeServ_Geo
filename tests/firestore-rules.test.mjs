@@ -64,6 +64,11 @@ test('activity logs are owner-only, append-only and use server time and real act
   await assertFails(setDoc(doc(collection(member, 'activityLogs')), { ...entry('member', 'login'), timestamp: new Date(0) }));
   await assertFails(setDoc(doc(collection(member, 'activityLogs')), entry('member', 'update', 'existing')));
 });
+test('only owner can append plan image and PDF export activity', async () => {
+  await assertSucceeds(setDoc(doc(collection(owner, 'activityLogs')), entry('owner', 'plan_image_save', '', 'Community pruning plan')));
+  await assertSucceeds(setDoc(doc(collection(owner, 'activityLogs')), entry('owner', 'plan_pdf_save', '', 'Community pruning plan')));
+  await assertFails(setDoc(doc(collection(member, 'activityLogs')), entry('member', 'plan_pdf_save', '', 'Community pruning plan')));
+});
 test('owner delete requires an atomic deletion receipt and activity record', async () => {
   await assertFails(deleteDoc(doc(member, 'workRecords', 'delete-me')));
   await assertFails(deleteDoc(doc(owner, 'workRecords', 'delete-me')));

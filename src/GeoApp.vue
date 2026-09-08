@@ -9,6 +9,7 @@ import { getRuntimeConfig } from './runtime-config';
 import { crewOptions, demoLocations } from './demo-data';
 import RouteMap, { type RoutePoint } from './RouteMap.vue';
 import ActivityLog from './ActivityLog.vue';
+import PlanBook from './PlanBook.vue';
 
 type WorkRecord = { authorId?:string; routePoints?:RoutePoint[]; routeNotes?:string; sourceImported?:boolean; id:string; locationId:string; title:string; notes:string; imageUrls:string[]; youtubeUrls:string[]; fileUrls:string[]; authorName:string; createdAt?:any; dateLabel?:string; workDate?:string; endDate?:string; crew?:string[]; meetingTime?:string; meetingPlace?:string; mapUrl?:string; weather?:string; hospitalName?:string; hospitalPhone?:string; hospitalDistance?:string; hospitalTravelTime?:string; workDetails?:string; assignments?:string; crane?:string; disposal?:string; parking?:string; roadPermit?:string; equipment?:string; safetyNotes?:string };
 type Location = { id: string; name: string; address: string; lat: number; lng: number; status: string; attention: string; aliases: string[]; records?: WorkRecord[]; isDemo?: boolean; updatedAt?: any };
@@ -28,6 +29,7 @@ const showCreate = ref(false);
 const editing = ref<WorkRecord | null>(null);
 const saving = ref(false);
 const showLogs = ref(false);
+const showPlan = ref(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'plan');
 const formLocationId = ref('');
 const routePoints = ref<RoutePoint[]>([]);
 const routeNotes = ref('');
@@ -225,6 +227,9 @@ async function fetchWeather(){
 function resetForm(){ Object.assign(form,{name:'',address:'',status:'進行中',attention:'',title:'',notes:'',imageUrls:'',youtubeUrls:'',fileUrls:'',lat:activeLocation.value?.lat ?? 25.0684,lng:activeLocation.value?.lng ?? 121.6158,...structuredClone(emptyRecordFields)}); editing.value=null; creatingForActive.value=false; routePoints.value=[]; routeNotes.value=''; formLocationId.value=activeLocation.value?.id || ''; }
 function closeForm(){ if(!saving.value) showCreate.value=false; }
 function openCreate(forActive=false){ if(firebaseReady && !user.value){notify('登入後即可建立工作紀錄');return;} resetForm(); creatingForActive.value=forActive; if(!forActive)formLocationId.value=''; showCreate.value=true; }
+function openPlan(){ if(role.value!=='owner'){notify('請先以 Owner 帳號登入後製作計畫書');return;} showLogs.value=false;showPlan.value=true; }
+async function closePlan(){ showPlan.value=false;window.history.pushState({},'',window.location.pathname);await nextTick();map.value?.invalidateSize?.(); }
+function handlePopState(){ showPlan.value=new URLSearchParams(window.location.search).get('view')==='plan'&&role.value==='owner'; }
 async function openEdit(record:WorkRecord){
   if (!canEdit(record)) return;
   resetForm(); editing.value=record; formLocationId.value=record.locationId;
@@ -311,12 +316,13 @@ async function purgeLegacyData(){
 }
 
 async function login(){ try{ await googleSignIn(); notify('已使用 Google 帳號登入'); }catch(error){ notify(error instanceof Error?error.message:'登入失敗'); } }
-async function logout(){ if(auth){try { if(user.value) await logActivity(user.value,'logout'); } catch { notify('登出紀錄寫入失敗'); } await signOut(auth);showLogs.value=false;showCreate.value=false;notify('已登出');} }
+async function logout(){ if(auth){try { if(user.value) await logActivity(user.value,'logout'); } catch { notify('登出紀錄寫入失敗'); } await signOut(auth);showLogs.value=false;showCreate.value=false;showPlan.value=false;notify('已登出');} }
 
 onMounted(async()=>{
   window.addEventListener('keydown',handleSearchShortcut);
+  window.addEventListener('popstate',handlePopState);
   locations.value=demos.value;
-  if(auth) authStop=onAuthStateChanged(auth,(account)=>{const previous=user.value?.uid;user.value=account;if(!account){showLogs.value=false;showCreate.value=false;}if(account && account.uid!==previous) logActivity(account,'login').catch(()=>notify('登入成功，但登入紀錄寫入失敗，請檢查資料庫權限'));});
+  if(auth) authStop=onAuthStateChanged(auth,(account)=>{const previous=user.value?.uid;user.value=account;if(!account){showLogs.value=false;showCreate.value=false;showPlan.value=false;}else if(userRole(account)!=='owner'){showPlan.value=false;}if(account && account.uid!==previous) logActivity(account,'login').catch(()=>notify('登入成功，但登入紀錄寫入失敗，請檢查資料庫權限'));});
   if(db){
     importedStop=onSnapshot(collection(db,'importedRecordStates'), snapshot=>{importedDeleted.value=snapshot.docs.filter(d=>d.data().deleted).map(d=>d.id);},()=>notify('匯入紀錄同步失敗，請重新整理'));
     locationsStop=onSnapshot(query(collection(db,'locations'),orderBy('updatedAt','desc')),(snapshot)=>{const stored=snapshot.docs.map((d)=>({id:d.id,...d.data()} as Location));locations.value=mergeLocations(stored);if(!activeId.value&&locations.value[0])activeId.value=locations.value[0].id;drawMarkers();},()=>{locations.value=demos.value;notify('目前顯示展示資料');});
@@ -324,14 +330,15 @@ onMounted(async()=>{
   }
   await nextTick(); initMap();
 });
-onUnmounted(()=>{window.removeEventListener('keydown',handleSearchShortcut);authStop?.();locationsStop?.();recordsStop?.();importedStop?.();map.value?.remove?.();});
+onUnmounted(()=>{window.removeEventListener('keydown',handleSearchShortcut);window.removeEventListener('popstate',handlePopState);authStop?.();locationsStop?.();recordsStop?.();importedStop?.();map.value?.remove?.();});
 watch([()=>locations.value.length,()=>records.value.length],()=>drawMarkers());
 watch(()=>`${activeId.value}:${activeRecords.value.map((record)=>record.id).join(',')}`,()=>{activeRecordId.value=activeRecords.value[0]?.id ?? '';},{immediate:true});
 </script>
 
 <template>
   <main class="app-shell">
-    <header class="topbar">
+    <PlanBook v-if="showPlan && role==='owner'" :account="user!" @back="closePlan" />
+    <header v-else class="topbar">
       <button class="brand" @click="activeId=locations[0]?.id"><span class="brand-pin">⌖</span><span><strong>TreeServ Geo</strong><small>案場工作紀錄</small></span></button>
       <div class="search-wrap" @focusout="closeSearch">
         <label class="global-search"><span>⌕</span><input ref="searchInput" v-model="searchText" @focus="searchOpen=true" @input="onSearchInput" @keydown.down.prevent="moveSuggestion(1)" @keydown.up.prevent="moveSuggestion(-1)" @keydown.enter.prevent="chooseFocusedSuggestion" @keydown.escape="searchOpen=false" placeholder="搜尋地點、地址、注意事項或紀錄…" aria-label="搜尋已記錄地點" role="combobox" aria-autocomplete="list" :aria-expanded="searchOpen" aria-controls="location-result"><kbd>⌘ K</kbd></label>
@@ -339,12 +346,13 @@ watch(()=>`${activeId.value}:${activeRecords.value.map((record)=>record.id).join
       </div>
       <button v-if="role==='owner'" class="audit-nav" @click="showLogs=!showLogs">{{showLogs?'返回地圖':'操作紀錄'}}</button>
       <button class="primary-action" @click="openCreate(false)"><span>＋</span>建立工作紀錄</button>
+      <button class="plan-action" @click="openPlan"><span>＋</span>製作計畫書</button>
       <button v-if="!user" class="login-button" @click="login">使用 Google 登入</button>
       <button v-else class="account-button" @click="logout" :title="`${user.email}（點擊登出）`">{{user.displayName?.slice(0,1) || user.email?.slice(0,1)}}<span>{{role==='owner'?'Owner':'User'}}</span></button>
     </header>
 
-    <ActivityLog v-if="showLogs && role==='owner'" />
-    <section v-show="!showLogs" class="workspace">
+    <ActivityLog v-if="!showPlan && showLogs && role==='owner'" />
+    <section v-show="!showPlan && !showLogs" class="workspace">
       <aside class="places-panel">
         <div class="panel-heading"><div><small>工作地點</small><strong>{{locations.length}} 個案場</strong></div><span class="sync-state"><i/>{{firebaseReady?'即時同步':'離線預覽'}}</span></div>
         <div class="place-list"><button v-for="(place,index) in locations" :key="place.id" :class="['place-row',{active:place.id===activeLocation?.id,warn:place.status.includes('注意')} ]" @click="selectLocation(place)"><span class="place-index">{{String(index+1).padStart(2,'0')}}</span><span><strong>{{place.name}}</strong><small>{{locationRecordCount(place)}} 筆紀錄 · {{place.status}}</small></span><b v-if="place.status.includes('注意')">!</b></button></div>
@@ -393,7 +401,7 @@ watch(()=>`${activeId.value}:${activeRecords.value.map((record)=>record.id).join
       </aside>
     </section>
 
-    <div v-if="showCreate" class="modal-layer" @mousedown.self="closeForm">
+    <div v-if="showCreate && !showPlan" class="modal-layer" @mousedown.self="closeForm">
       <form class="record-modal" @submit.prevent="saveRecord">
         <div class="modal-head"><div><small>{{editing?'更新紀錄':'新增案場紀錄'}}</small><h2>{{editing?'編輯工作內容':'建立工作紀錄'}}</h2></div><button type="button" @click="closeForm">×</button></div>
         <div class="form-scroll"><fieldset class="record-fields" :disabled="saving">
@@ -411,7 +419,7 @@ watch(()=>`${activeId.value}:${activeRecords.value.map((record)=>record.id).join
         <div class="modal-actions"><button type="button" @click="closeForm">取消</button><button class="save" type="submit" :disabled="saving">{{saving?'儲存中…':editing?'儲存變更':'建立紀錄'}}</button></div>
       </form>
     </div>
-    <div v-if="routeRecord" class="modal-layer" @mousedown.self="routeRecord=null"><section class="record-modal" role="dialog" aria-modal="true" aria-label="進場路線"><div class="modal-head"><h2>{{routeRecord.title}} · 進場路線</h2><button @click="routeRecord=null" aria-label="關閉路線">×</button></div><div class="form-scroll"><RouteMap :model-value="routeRecord.routePoints || []" :center="routeRecord.routePoints?.[0] || {lat:25.0684,lng:121.6158}" /><p class="route-instructions">{{routeRecord.routeNotes || '請依箭頭方向進場。'}}</p></div></section></div>
+    <div v-if="routeRecord && !showPlan" class="modal-layer" @mousedown.self="routeRecord=null"><section class="record-modal" role="dialog" aria-modal="true" aria-label="進場路線"><div class="modal-head"><h2>{{routeRecord.title}} · 進場路線</h2><button @click="routeRecord=null" aria-label="關閉路線">×</button></div><div class="form-scroll"><RouteMap :model-value="routeRecord.routePoints || []" :center="routeRecord.routePoints?.[0] || {lat:25.0684,lng:121.6158}" /><p class="route-instructions">{{routeRecord.routeNotes || '請依箭頭方向進場。'}}</p></div></section></div>
     <div v-if="toast" class="toast" role="status">{{toast}}</div>
   </main>
 </template>

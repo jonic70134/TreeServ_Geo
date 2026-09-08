@@ -24,7 +24,7 @@ export async function googleSignIn() {
   await signInWithPopup(auth, new GoogleAuthProvider());
 }
 
-export type AuditAction = 'login' | 'logout' | 'create' | 'edit' | 'update' | 'delete';
+export type AuditAction = 'login' | 'logout' | 'create' | 'edit' | 'update' | 'delete' | 'plan_image_save' | 'plan_pdf_save';
 export function auditData(account: User, action: AuditAction, recordId = '', recordTitle = '') {
   return { actorId: account.uid, actorEmail: account.email || '', actorName: account.displayName || '', action, recordId, recordTitle, timestamp: serverTimestamp() };
 }
