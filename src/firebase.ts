@@ -1,5 +1,17 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User } from 'firebase/auth';
+import {
+  browserLocalPersistence,
+  browserPopupRedirectResolver,
+  browserSessionPersistence,
+  getAuth,
+  GoogleAuthProvider,
+  indexedDBLocalPersistence,
+  initializeAuth,
+  signInWithPopup,
+  signOut,
+  onAuthStateChanged,
+  type User,
+} from 'firebase/auth';
 import {
   addDoc, collection, deleteDoc, doc, getDoc, getFirestore, onSnapshot, orderBy, query,
   serverTimestamp, setDoc, updateDoc, writeBatch, limit, getDocs, startAfter,
@@ -18,9 +30,23 @@ const config = getRuntimeConfig()?.firebase ?? {
 
 export const firebaseReady = Boolean(config.apiKey && config.projectId && config.authDomain);
 const app = firebaseReady ? (getApps()[0] ?? initializeApp(config)) : null;
-export const auth = app ? getAuth(app) : null;
+export const auth = app
+  ? (() => {
+      try {
+        return initializeAuth(app, {
+          persistence: [indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence],
+          popupRedirectResolver: browserPopupRedirectResolver,
+        });
+      } catch {
+        // Development hot reload can reuse an Auth instance that is already initialized.
+        return getAuth(app);
+      }
+    })()
+  : null;
 export const db = app ? getFirestore(app) : null;
 export const ownerEmail = 'jonic70134@gmail.com';
+
+let googleSignInInFlight: ReturnType<typeof signInWithPopup> | null = null;
 
 export type AccessRole = 'owner' | 'admin' | 'user';
 export type MemberProfile = {
@@ -44,9 +70,27 @@ export const isOwnerAccount = (user: User | null) =>
 
 export async function googleSignIn() {
   if (!auth) throw new Error('Firebase 尚未設定');
+  if (googleSignInInFlight) return googleSignInInFlight;
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
-  return signInWithPopup(auth, provider);
+  googleSignInInFlight = signInWithPopup(auth, provider);
+  try {
+    return await googleSignInInFlight;
+  } finally {
+    googleSignInInFlight = null;
+  }
+}
+
+export function authErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
+  if (code === 'auth/popup-closed-by-user') return '登入視窗已關閉，尚未完成登入。';
+  if (code === 'auth/popup-blocked') return '瀏覽器封鎖了登入視窗，請允許此網站開啟彈出式視窗後再試。';
+  if (code === 'auth/cancelled-popup-request') return '已有登入視窗正在處理，請在該視窗完成登入。';
+  if (message.toLowerCase().includes('missing initial state')) {
+    return 'Google 登入工作階段已失效。請關閉舊的登入視窗、重新整理本頁，再按一次登入。';
+  }
+  return message || 'Google 登入失敗。';
 }
 
 export async function authorizeAccount(account: User): Promise<AccessRole> {

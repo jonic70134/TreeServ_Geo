@@ -23,7 +23,7 @@ import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded';
 import {
   AccessDeniedError, auditData, auth, authorizeAccount, collection, db, doc, firebaseReady,
   googleSignIn, logActivity, onAuthStateChanged, onSnapshot, orderBy, query,
-  serverTimestamp, signOut, writeBatch, type AccessRole, type User,
+  authErrorMessage, serverTimestamp, signOut, writeBatch, type AccessRole, type User,
 } from './firebase';
 import { crewOptions, demoLocations } from './demo-data';
 import type { RoutePoint, SiteLocation, WorkRecord } from './types';
@@ -127,7 +127,13 @@ export default function TreeServApp() {
     return mapLocations.filter((location) => normalizeSearch([location.name, location.address, location.attention, ...(location.aliases ?? []), ...location.records!.flatMap((record) => [record.title, record.notes, record.workDetails ?? '', record.safetyNotes ?? ''])].join(' ')).includes(needle));
   }, [mapLocations, search]);
 
-  async function login() { setAuthBusy(true); setAuthError(''); try { await googleSignIn(); } catch (error) { setAuthError(error instanceof Error ? error.message : 'Google 登入失敗。'); setAuthBusy(false); } }
+  async function login() {
+    if (authBusy) return;
+    setAuthBusy(true);
+    setAuthError('');
+    try { await googleSignIn(); }
+    catch (error) { setAuthError(authErrorMessage(error)); setAuthBusy(false); }
+  }
   async function logout() { if (!auth) return; try { if (account) await logActivity(account, 'logout'); } finally { await signOut(auth); setMenuAnchor(undefined); } }
   const canManage = role === 'owner' || role === 'admin';
   const isImported = (record: WorkRecord) => demos.some((location) => location.records?.some((item) => item.id === record.id));
@@ -186,7 +192,7 @@ export default function TreeServApp() {
   async function runConfirm() { if (!confirm) return; setSaving(true); try { await confirm.run(); setConfirm(undefined); } catch { notify('操作失敗，請重新整理後再試。'); } finally { setSaving(false); } }
 
   if (authBusy) return <Stack spacing={2} sx={{ minHeight: '100vh', alignItems: 'center', justifyContent: 'center' }}><CircularProgress /><Typography color="text.secondary">正在確認 Google 帳號與邀請資格…</Typography></Stack>;
-  if (!account || !role) return <Box className="login-stage"><Paper variant="outlined" sx={{ width: 'min(440px, calc(100% - 32px))', p: { xs: 3, md: 5 } }}><Stack spacing={3}><Box><Avatar sx={{ bgcolor: 'primary.main', width: 56, height: 56, mb: 2 }}><MapRounded /></Avatar><Typography variant="h4" gutterBottom>TreeServ Geo</Typography><Typography color="text.secondary">僅限收到 Owner 或系統管理者邀請的 Google 帳號登入。</Typography></Box>{new URLSearchParams(window.location.search).get('invite') && <Alert severity="info">請使用收到邀請的 Google 帳號登入；帳號必須與邀請信箱相同。</Alert>}{authError && <Alert severity="error">{authError}</Alert>}<Button size="large" variant="contained" startIcon={<Google />} disabled={!firebaseReady} onClick={login}>使用受邀 Google 帳號登入</Button><Typography variant="caption" color="text.secondary">Google 只確認帳號身分；TreeServ Geo 會再核對邀請與帳號狀態。</Typography></Stack></Paper></Box>;
+  if (!account || !role) return <Box className="login-stage"><Paper variant="outlined" sx={{ width: 'min(440px, calc(100% - 32px))', p: { xs: 3, md: 5 } }}><Stack spacing={3}><Box><Avatar sx={{ bgcolor: 'primary.main', width: 56, height: 56, mb: 2 }}><MapRounded /></Avatar><Typography variant="h4" gutterBottom>TreeServ Geo</Typography><Typography color="text.secondary">僅限收到 Owner 或系統管理者邀請的 Google 帳號登入。</Typography></Box>{new URLSearchParams(window.location.search).get('invite') && <Alert severity="info">請使用收到邀請的 Google 帳號登入；帳號必須與邀請信箱相同。</Alert>}{authError && <Alert severity="error">{authError}</Alert>}<Button size="large" variant="contained" startIcon={<Google />} disabled={!firebaseReady || authBusy} loading={authBusy} onClick={login}>使用受邀 Google 帳號登入</Button><Typography variant="caption" color="text.secondary">Google 只確認帳號身分；TreeServ Geo 會再核對邀請與帳號狀態。</Typography></Stack></Paper></Box>;
   if (view === 'plan') return <PlanBook account={account} onBack={() => setView('map')} />;
 
   const labels: Array<[keyof RecordForm, string, boolean?]> = [
