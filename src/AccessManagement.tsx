@@ -30,7 +30,7 @@ export default function AccessManagement({ account, role, notify }: { account: U
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [confirm, setConfirm] = useState<{ title: string; body: string; run: () => Promise<void> }>();
-  const canInviteAdmin = role === 'owner';
+  const canInviteAdmin = role === 'owner' || role === 'admin';
 
   useEffect(() => {
     if (!db) return;
@@ -47,7 +47,7 @@ export default function AccessManagement({ account, role, notify }: { account: U
     const target = normalizeEmail(email);
     if (!/^\S+@\S+\.\S+$/.test(target)) { setError('請輸入完整的 Google 帳號電子郵件。'); return; }
     if (target === normalizeEmail(account.email ?? '')) { setError('目前登入帳號不需要邀請。'); return; }
-    if (inviteRole === 'admin' && !canInviteAdmin) { setError('只有 Owner 可以邀請系統管理者。'); return; }
+    if (inviteRole === 'admin' && !canInviteAdmin) { setError('只有管理者可以邀請系統管理者。'); return; }
     setBusy(true); setError('');
     try {
       const batch = writeBatch(db);
@@ -87,8 +87,7 @@ export default function AccessManagement({ account, role, notify }: { account: U
   function changeMember(member: Member, action: 'role' | 'status') {
     const nextRole = member.role === 'admin' ? 'user' : 'admin';
     const nextStatus = member.status === 'active' ? 'disabled' : 'active';
-    if (role !== 'owner' && member.role === 'admin') { notify('系統管理者不能變更其他管理者。'); return; }
-    if (action === 'role' && role !== 'owner') { notify('只有 Owner 可以調整管理者角色。'); return; }
+    if (member.uid === account.uid) { notify('不能變更自己的角色或帳號狀態。'); return; }
     setConfirm({
       title: action === 'role' ? '變更帳號角色？' : `${nextStatus === 'disabled' ? '停用' : '啟用'}帳號？`,
       body: action === 'role' ? `${member.email} 將變更為${roleLabel(nextRole)}。` : `${member.email} 將${nextStatus === 'disabled' ? '立即失去' : '重新取得'}系統存取權。`,
@@ -113,7 +112,7 @@ export default function AccessManagement({ account, role, notify }: { account: U
   return (
     <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1180, mx: 'auto' }}>
       <Typography variant="h4" gutterBottom>權限管理</Typography>
-      <Typography color="text.secondary" sx={{ mb: 3 }}>只有邀請名單中的 Google 帳號可以進入。Owner 可管理所有角色；系統管理者可邀請及管理一般使用者。</Typography>
+      <Typography color="text.secondary" sx={{ mb: 3 }}>只有邀請名單中的 Google 帳號可以進入。Owner 與系統管理者皆可邀請及管理其他帳號。</Typography>
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
       <Paper variant="outlined" sx={{ p: 2.5, mb: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ alignItems: { md: 'center' } }}>
@@ -129,7 +128,7 @@ export default function AccessManagement({ account, role, notify }: { account: U
         <Stack divider={<Box sx={{ borderTop: 1, borderColor: 'divider' }} />}>
           {tab === 0 && sortedInvites.map((invite) => <Stack key={invite.id} direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' }, p: 2 }}><Box><Typography sx={{ fontWeight: 750 }}>{invite.email}</Typography><Typography variant="caption" color="text.secondary">{roleLabel(invite.role)}・{dateLabel(invite.invitedAt)}</Typography></Box><Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}><Chip size="small" color={invite.status === 'pending' ? 'warning' : invite.status === 'accepted' ? 'success' : 'default'} label={invite.status === 'pending' ? '等待登入' : invite.status === 'accepted' ? '已接受' : '已撤銷'} />{invite.status === 'pending' && <Tooltip title="複製邀請連結"><IconButton onClick={() => copyInvite(invite.email)}><ContentCopyRounded /></IconButton></Tooltip>}{invite.status === 'pending' && <Button color="error" size="small" startIcon={<BlockRounded />} onClick={() => revokeInvite(invite)}>撤銷</Button>}</Stack></Stack>)}
           {tab === 0 && !sortedInvites.length && <Typography sx={{ p: 4 }} align="center" color="text.secondary">尚未建立邀請。</Typography>}
-          {tab === 1 && sortedMembers.map((member) => <Stack key={member.id} direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' }, p: 2 }}><Box><Typography sx={{ fontWeight: 750 }}>{member.displayName || member.email}</Typography><Typography variant="caption" color="text.secondary">{member.email}・{roleLabel(member.role)}</Typography></Box><Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}><Chip size="small" color={member.status === 'active' ? 'success' : 'default'} label={member.status === 'active' ? '使用中' : '已停用'} />{role === 'owner' && <Button size="small" onClick={() => changeMember(member, 'role')}>改為{roleLabel(member.role === 'admin' ? 'user' : 'admin')}</Button>}{(role === 'owner' || member.role === 'user') && <Button color={member.status === 'active' ? 'error' : 'success'} size="small" startIcon={member.status === 'active' ? <BlockRounded /> : <CheckCircleRounded />} onClick={() => changeMember(member, 'status')}>{member.status === 'active' ? '停用' : '啟用'}</Button>}</Stack></Stack>)}
+          {tab === 1 && sortedMembers.map((member) => <Stack key={member.id} direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' }, p: 2 }}><Box><Typography sx={{ fontWeight: 750 }}>{member.displayName || member.email}</Typography><Typography variant="caption" color="text.secondary">{member.email}・{roleLabel(member.role)}</Typography></Box><Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}><Chip size="small" color={member.status === 'active' ? 'success' : 'default'} label={member.status === 'active' ? '使用中' : '已停用'} />{member.uid !== account.uid && <Button size="small" onClick={() => changeMember(member, 'role')}>改為{roleLabel(member.role === 'admin' ? 'user' : 'admin')}</Button>}{member.uid !== account.uid && <Button color={member.status === 'active' ? 'error' : 'success'} size="small" startIcon={member.status === 'active' ? <BlockRounded /> : <CheckCircleRounded />} onClick={() => changeMember(member, 'status')}>{member.status === 'active' ? '停用' : '啟用'}</Button>}</Stack></Stack>)}
           {tab === 1 && !sortedMembers.length && <Typography sx={{ p: 4 }} align="center" color="text.secondary">尚無受邀帳號完成登入。</Typography>}
         </Stack>
       </Paper>
