@@ -1,1 +1,20 @@
-m«ëˆ§½©buªàºg§µªiş– zÛ1RÆ y¶¬{®vçºh¢ø¥zŠ.µø¥y¶ëy©­æ¤zw(uçhºÚn¶êbÚ%Šw¬¡ù^aéƒu×œ¡×yÊz)éºØazZ]ŠÊek+aŠÉ²Æ z(§¦ëb›­~)^uçÚº[_¢»-v)è¢ëiºÚ.¶›­~)^uçÚº[_¢»-v‹­
+import MaterialShell from './material-shell';
+import type { TreeServRuntimeConfig } from '../src/runtime-config';
+
+export default function Home() {
+  const runtimeConfig: TreeServRuntimeConfig = {
+    firebase: {
+      apiKey: process.env.VITE_FIREBASE_API_KEY ?? '',
+      authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN ?? '',
+      projectId: process.env.VITE_FIREBASE_PROJECT_ID ?? '',
+      storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET ?? '',
+      messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? '',
+      appId: process.env.VITE_FIREBASE_APP_ID ?? '',
+    },
+    mapProvider: process.env.VITE_MAP_PROVIDER === 'google' ? 'google' : 'openstreetmap',
+    googleMapsApiKey: process.env.VITE_GOOGLE_MAPS_API_KEY ?? '',
+    googleMapId: process.env.VITE_GOOGLE_MAP_ID ?? '',
+  };
+
+  return <MaterialShell runtimeConfig={runtimeConfig} />;
+}

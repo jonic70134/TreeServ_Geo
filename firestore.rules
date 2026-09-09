@@ -1,1 +1,255 @@
-m«ëˆ§½©buªàºg§µø«zËh­êî•ë±¨m«ë€İ…¹îš(§~)^¢‹­~)^mºŞjFëy©ÊyÚ.¶›­º˜§¶‰bë(~W§‚Øgº`İuç(uç^r‡^Šzn¶^–—b²™ZÊØb²g¬±¨Š)éºØ§¦ë_ŠWyö®–×è®Ë]Šz(ºÚn¶‹­¦ë_ŠWyö®–×è®Ë]¢ë
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email is string;
+    }
+
+    function isOwner() {
+      return signedIn() && request.auth.token.email == 'jonic70134@gmail.com';
+    }
+
+    function memberExists() {
+      return signedIn() && exists(/databases/$(database)/documents/members/$(request.auth.uid));
+    }
+
+    function member() {
+      return get(/databases/$(database)/documents/members/$(request.auth.uid)).data;
+    }
+
+    function isActiveMember() {
+      return memberExists()
+        && member().uid == request.auth.uid
+        && member().email == request.auth.token.email
+        && member().status == 'active'
+        && member().role in ['admin', 'user'];
+    }
+
+    function hasAccess() {
+      return isOwner() || isActiveMember();
+    }
+
+    function isAdmin() {
+      return isOwner() || (isActiveMember() && member().role == 'admin');
+    }
+
+    function allowedInviteRole(role) {
+      return role == 'user' || (role == 'admin' && isOwner());
+    }
+
+    function validRecordAudit(recordId, action) {
+      let auditId = request.resource.data.lastAuditId;
+      let entry = getAfter(/databases/$(database)/documents/activityLogs/$(auditId)).data;
+      return !exists(/databases/$(database)/documents/activityLogs/$(auditId))
+        && entry.actorId == request.auth.uid
+        && entry.action == action
+        && entry.recordId == recordId
+        && entry.timestamp == request.time;
+    }
+
+    function validActivityShape() {
+      let entry = request.resource.data;
+      return signedIn()
+        && entry.keys().hasOnly(['actorId', 'actorEmail', 'actorName', 'action', 'recordId', 'recordTitle', 'timestamp'])
+        && entry.actorId == request.auth.uid
+        && entry.actorEmail == request.auth.token.email
+        && entry.actorName is string
+        && entry.actorName.size() <= 160
+        && entry.recordTitle is string
+        && entry.recordTitle.size() <= 500
+        && entry.recordId is string
+        && entry.recordId.size() <= 320
+        && entry.timestamp == request.time;
+    }
+
+    match /locations/{locationId} {
+      allow read: if hasAccess();
+      allow create: if hasAccess()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 300;
+      allow update: if hasAccess()
+        && (isAdmin() || resource.data.createdBy == request.auth.uid)
+        && request.resource.data.createdBy == resource.data.createdBy;
+      allow delete: if isOwner();
+    }
+
+    match /workRecords/{recordId} {
+      allow read: if hasAccess();
+      allow create: if hasAccess()
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 500
+        && (
+          validRecordAudit(recordId, 'create')
+          || (isOwner() && request.resource.data.sourceImported == true && validRecordAudit(recordId, 'update'))
+        );
+      allow update: if hasAccess()
+        && (isAdmin() || resource.data.authorId == request.auth.uid)
+        && request.resource.data.authorId == resource.data.authorId
+        && request.resource.data.authorName == resource.data.authorName
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.locationId == resource.data.locationId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 500
+        && validRecordAudit(recordId, 'update');
+      allow delete: if isOwner()
+        && getAfter(/databases/$(database)/documents/recordDeletions/$(recordId)).data.timestamp == request.time
+        && getAfter(/databases/$(database)/documents/recordDeletions/$(recordId)).data.actorId == request.auth.uid;
+    }
+
+    match /activityLogs/{entryId} {
+      allow read: if isAdmin();
+      allow create: if validActivityShape() && (
+        (request.resource.data.action in ['login', 'logout']
+          && hasAccess()
+          && request.resource.data.recordId == '')
+        || (request.resource.data.action in ['plan_image_save', 'plan_pdf_save']
+          && isOwner()
+          && request.resource.data.recordId == '')
+        || (request.resource.data.action == 'invite_accept'
+          && request.resource.data.recordId == request.auth.uid
+          && getAfter(/databases/$(database)/documents/members/$(request.auth.uid)).data.uid == request.auth.uid
+          && getAfter(/databases/$(database)/documents/members/$(request.auth.uid)).data.email == request.auth.token.email
+          && getAfter(/databases/$(database)/documents/members/$(request.auth.uid)).data.status == 'active'
+          && getAfter(/databases/$(database)/documents/accessInvites/$(request.auth.token.email)).data.status == 'accepted'
+          && getAfter(/databases/$(database)/documents/accessInvites/$(request.auth.token.email)).data.acceptedBy == request.auth.uid)
+        || (request.resource.data.action in ['invite_create', 'invite_revoke', 'member_role', 'member_enable', 'member_disable']
+          && isAdmin())
+        || (request.resource.data.action == 'edit'
+          && hasAccess()
+          && (isAdmin() || get(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId)).data.authorId == request.auth.uid))
+        || (request.resource.data.action in ['create', 'update']
+          && hasAccess()
+          && getAfter(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId)).data.lastAuditId == entryId
+          && getAfter(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId)).data.updatedAt == request.time)
+        || (request.resource.data.action == 'delete'
+          && isOwner()
+          && getAfter(/databases/$(database)/documents/recordDeletions/$(request.resource.data.recordId)).data.auditId == entryId
+          && (exists(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId))
+            || getAfter(/databases/$(database)/documents/importedRecordStates/$(request.resource.data.recordId)).data.deleted == true)
+          && !existsAfter(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId)))
+      );
+      allow update, delete: if false;
+    }
+
+    match /accessInvites/{inviteEmail} {
+      allow read: if isAdmin() || (signedIn() && request.auth.token.email == inviteEmail);
+
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['email', 'role', 'status', 'invitedBy', 'invitedByEmail', 'invitedAt', 'updatedAt'])
+        && request.resource.data.email == inviteEmail
+        && request.resource.data.status == 'pending'
+        && allowedInviteRole(request.resource.data.role)
+        && request.resource.data.invitedBy == request.auth.uid
+        && request.resource.data.invitedByEmail == request.auth.token.email
+        && request.resource.data.invitedAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      allow update: if (
+        signedIn()
+        && request.auth.token.email == inviteEmail
+        && resource.data.email == inviteEmail
+        && resource.data.status == 'pending'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'acceptedBy', 'acceptedAt', 'updatedAt'])
+        && request.resource.data.status == 'accepted'
+        && request.resource.data.acceptedBy == request.auth.uid
+        && request.resource.data.acceptedAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && getAfter(/databases/$(database)/documents/members/$(request.auth.uid)).data.email == inviteEmail
+      ) || (
+        isAdmin()
+        && resource.data.email == inviteEmail
+        && resource.data.status == 'pending'
+        && (resource.data.role == 'user' || isOwner())
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+        && request.resource.data.status == 'revoked'
+        && request.resource.data.updatedAt == request.time
+      ) || (
+        isAdmin()
+        && request.resource.data.keys().hasOnly(['email', 'role', 'status', 'invitedBy', 'invitedByEmail', 'invitedAt', 'updatedAt'])
+        && request.resource.data.email == inviteEmail
+        && request.resource.data.status == 'pending'
+        && allowedInviteRole(request.resource.data.role)
+        && request.resource.data.invitedBy == request.auth.uid
+        && request.resource.data.invitedByEmail == request.auth.token.email
+        && request.resource.data.invitedAt == request.time
+        && request.resource.data.updatedAt == request.time
+      );
+      allow delete: if false;
+    }
+
+    match /members/{memberId} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == memberId);
+
+      allow create: if signedIn()
+        && request.auth.uid == memberId
+        && request.resource.data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'status', 'invitedBy', 'invitedAt', 'acceptedAt', 'updatedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() <= 160
+        && request.resource.data.status == 'active'
+        && request.resource.data.role == get(/databases/$(database)/documents/accessInvites/$(request.auth.token.email)).data.role
+        && get(/databases/$(database)/documents/accessInvites/$(request.auth.token.email)).data.status == 'pending'
+        && getAfter(/databases/$(database)/documents/accessInvites/$(request.auth.token.email)).data.status == 'accepted'
+        && getAfter(/databases/$(database)/documents/accessInvites/$(request.auth.token.email)).data.acceptedBy == request.auth.uid
+        && request.resource.data.acceptedAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      allow update: if request.resource.data.uid == resource.data.uid
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.invitedBy == resource.data.invitedBy
+        && request.resource.data.invitedAt == resource.data.invitedAt
+        && request.resource.data.acceptedAt == resource.data.acceptedAt
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'status', 'updatedAt'])
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.status in ['active', 'disabled']
+        && request.resource.data.role in ['admin', 'user']
+        && (
+          isOwner()
+          || (isActiveMember()
+            && member().role == 'admin'
+            && memberId != request.auth.uid
+            && resource.data.role == 'user'
+            && request.resource.data.role == 'user')
+        );
+      allow delete: if isOwner();
+    }
+
+    match /recordDeletions/{recordId} {
+      allow read: if isAdmin();
+      allow create: if isOwner()
+        && request.resource.data.actorId == request.auth.uid
+        && request.resource.data.recordId == recordId
+        && request.resource.data.timestamp == request.time
+        && getAfter(/databases/$(database)/documents/activityLogs/$(request.resource.data.auditId)).data.action == 'delete'
+        && getAfter(/databases/$(database)/documents/activityLogs/$(request.resource.data.auditId)).data.recordId == recordId
+        && (exists(/databases/$(database)/documents/workRecords/$(recordId))
+          || getAfter(/databases/$(database)/documents/importedRecordStates/$(recordId)).data.deleted == true)
+        && !existsAfter(/databases/$(database)/documents/workRecords/$(recordId));
+      allow update, delete: if false;
+    }
+
+    match /importedRecordStates/{recordId} {
+      allow read: if hasAccess();
+      allow create: if isOwner()
+        && request.resource.data.keys().hasOnly(['deleted', 'updatedAt', 'auditId'])
+        && request.resource.data.deleted == true
+        && request.resource.data.updatedAt == request.time
+        && getAfter(/databases/$(database)/documents/activityLogs/$(request.resource.data.auditId)).data.action == 'delete'
+        && getAfter(/databases/$(database)/documents/activityLogs/$(request.resource.data.auditId)).data.recordId == recordId;
+      allow update, delete: if false;
+    }
+
+    match /users/{userId} {
+      allow read: if isAdmin() || (hasAccess() && request.auth.uid == userId);
+      allow create: if hasAccess() && request.auth.uid == userId && request.resource.data.role == 'user';
+      allow update: if isOwner() || (hasAccess() && request.auth.uid == userId && request.resource.data.role == resource.data.role);
+      allow delete: if isOwner();
+    }
+  }
+}

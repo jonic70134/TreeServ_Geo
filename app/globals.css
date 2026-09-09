@@ -1,1 +1,111 @@
-m«ëˆ§½©buªàºg§µªiþ	hm©lrË±¨m«ë€Ý…¹îš(§~)^¢‹­~)^mºÞjFëy©ÊyÚ.¶›­º˜§¶‰bë(~W§‚Øgº`Ýuç(uç^r‡^Šzn¶^–—b²™ZÊØb²g¬±¨Š)éºØ§¦ë_ŠWyö®–×è®Ë]Šz(ºÚn¶‹­¦ë_ŠWyö®–×è®Ë]¢ë
+@import 'tailwindcss';
+
+:root {
+  color-scheme: light;
+  font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: #f4f6f2; }
+button, input, textarea, select { font: inherit; }
+
+.login-stage {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 15% 15%, rgba(239, 108, 38, .12), transparent 28%),
+    radial-gradient(circle at 85% 80%, rgba(31, 94, 61, .16), transparent 32%),
+    #eef2ec;
+}
+
+.mui-workspace {
+  height: calc(100vh - 64px);
+  display: grid;
+  grid-template-columns: 260px minmax(380px, 520px) minmax(360px, 1fr);
+  grid-template-areas: "places records map";
+  min-height: 0;
+}
+.mui-place-list { grid-area: places; display: flex; flex-direction: column; min-height: 0; overflow: auto; border-width: 0 1px 0 0 !important; }
+.mui-record-panel { grid-area: records; min-height: 0; overflow: auto; padding: 24px; border-width: 0 1px 0 0 !important; }
+.mui-map-panel { grid-area: map; position: relative; min-width: 0; min-height: 0; overflow: hidden; isolation: isolate; background: #dce5da; }
+.site-map { position: absolute; inset: 0; z-index: 1; }
+.map-provider-chip { position: absolute !important; left: 16px; bottom: 16px; z-index: 500; }
+.route-map { width: 100%; height: 340px; border-radius: 10px; overflow: hidden; z-index: 0; }
+
+.leaflet-tree-marker {
+  display: grid;
+  place-items: center;
+  background: #1f5e3d;
+  color: white;
+  border: 3px solid white;
+  border-radius: 50% 50% 50% 8px;
+  transform: rotate(-45deg);
+  box-shadow: 0 7px 18px rgba(22, 57, 38, .35);
+}
+.leaflet-tree-marker.active { background: #ef6c26; width: 46px !important; height: 46px !important; }
+.leaflet-tree-marker span { transform: rotate(45deg); font-size: 12px; font-weight: 800; }
+.route-pin { display: grid; place-items: center; background: #1f5e3d; color: white; border: 3px solid white; border-radius: 50%; font-weight: 800; box-shadow: 0 4px 14px rgba(22, 57, 38, .4); }
+.route-pin span { line-height: 24px; }
+.route-arrow span { display: block; color: #ef6c26; font-size: 25px; line-height: 24px; text-shadow: 0 1px white, 1px 0 white, 0 -1px white, -1px 0 white; }
+.leaflet-control-attribution { font-size: 9px !important; }
+
+.mui-image-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.mui-image-grid img { width: 100%; height: 180px; object-fit: cover; border-radius: 10px; background: #e3e8e1; }
+.mui-video { position: relative; padding-top: 56.25%; overflow: hidden; border-radius: 10px; background: #111; }
+.mui-video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+.canvas-frame {
+  min-height: 420px;
+  max-height: 62vh;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  border-radius: 10px;
+  background-color: #171b18;
+  background-image: linear-gradient(45deg, #202621 25%, transparent 25%), linear-gradient(-45deg, #202621 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #202621 75%), linear-gradient(-45deg, transparent 75%, #202621 75%);
+  background-size: 22px 22px;
+  background-position: 0 0, 0 11px, 11px -11px, -11px 0;
+}
+.canvas-frame canvas { display: block; max-width: 100%; max-height: 62vh; touch-action: none; cursor: crosshair; box-shadow: 0 5px 28px rgba(0, 0, 0, .55); }
+.floating-message { position: fixed !important; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 13000; min-width: min(520px, calc(100vw - 32px)); }
+
+.pdf-stack { position: fixed; left: -12000px; top: 0; width: 794px; z-index: -1; }
+.pdf-page { width: 794px; height: 1123px; overflow: hidden; display: flex; flex-direction: column; padding: 54px 58px 48px; background: white; color: #17231d; font-family: "Noto Sans TC", "PingFang TC", sans-serif; }
+.pdf-page header { display: flex; justify-content: space-between; padding-bottom: 12px; border-bottom: 5px solid #1f5e3d; color: #365241; font-size: 15px; }
+.pdf-page header strong { font-size: 16px; }
+.pdf-page h1 { margin: 42px 0 8px; font-size: 38px; letter-spacing: -.04em; }
+.pdf-page > p { margin: 0 0 32px; color: #637168; font-size: 18px; }
+.pdf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin-bottom: 22px; border: 1px solid #cdd9d0; background: #cdd9d0; }
+.pdf-grid > div { min-height: 94px; padding: 15px; background: #f7faf7; }
+.pdf-grid span, .pdf-grid small { display: block; color: #617068; font-size: 13px; }
+.pdf-grid strong { display: block; margin: 7px 0 2px; font-size: 18px; }
+.pdf-section { padding: 15px 2px; border-top: 1px solid #b8c5bc; }
+.pdf-section h2 { margin: 0 0 8px; color: #1f5e3d; font-size: 16px; }
+.pdf-section p { margin: 0; white-space: pre-wrap; font-size: 15px; line-height: 1.65; }
+.pdf-section.emphasis { margin-bottom: 9px; padding: 17px 18px; border: 0; border-left: 6px solid #1f5e3d; background: #f2f7ef; }
+.pdf-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+.pdf-photo-page { gap: 22px; }
+.pdf-photo { height: 470px; overflow: hidden; display: grid; grid-template-rows: auto 1fr auto; border: 1px solid #bcd4c1; }
+.pdf-photo h2 { margin: 0; padding: 10px 13px; background: #1f5e3d; color: white; font-size: 17px; }
+.pdf-photo img { width: 100%; height: 100%; min-height: 0; object-fit: contain; background: #eff2ee; }
+.pdf-photo p { min-height: 74px; margin: 0; padding: 11px 13px; white-space: pre-wrap; font-size: 14px; line-height: 1.6; }
+
+@media (max-width: 1120px) {
+  .mui-workspace { grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: minmax(360px, 58%) minmax(260px, 42%); grid-template-areas: "places records" "places map"; }
+}
+@media (max-width: 700px) {
+  .mui-workspace { height: auto; min-height: calc(100vh - 112px); grid-template-columns: 1fr; grid-template-rows: auto auto 52vh; grid-template-areas: "places" "records" "map"; }
+  .mui-place-list { max-height: 250px; border-width: 0 0 1px !important; }
+  .mui-record-panel { padding: 16px; border-width: 0 0 1px !important; }
+  .mui-map-panel { min-height: 52vh; }
+  .mui-image-grid { grid-template-columns: 1fr; }
+  .mui-image-grid img { height: 220px; }
+  .route-map { height: 300px; }
+  .canvas-frame { min-height: 300px; max-height: 52vh; }
+  .canvas-frame canvas { max-height: 52vh; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}

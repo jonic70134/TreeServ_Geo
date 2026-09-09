@@ -1,1 +1,65 @@
-m«ëˆ§½©buªàºg§¶ÊÜü-Šø­Èº ¶ÌT±¨m«ë€İ…¹îš(§~)^¢‹­~)^mºŞjFëy©ÊyÚ.¶›­º˜§¶‰bë(~W§‚Øgº`İuç(uç^r‡^Šzn¶^–—b²™ZÊØb²g¬±¨Š)éºØ§¦ë_ŠWyö®–×è®Ë]Šz(ºÚn¶‹­¦ë_ŠWyö®–×è®Ë]¢ë
+'use client';
+
+import { useEffect, useState } from 'react';
+import {
+  Alert, Box, Button, Chip, CircularProgress, Paper, Stack, Table, TableBody,
+  TableCell, TableContainer, TableHead, TableRow, Typography,
+} from '@mui/material';
+import RefreshRounded from '@mui/icons-material/RefreshRounded';
+import { collection, db, getDocs, limit, orderBy, query, startAfter, type QueryDocumentSnapshot } from './firebase';
+
+const labels: Record<string, string> = {
+  login: 'ç™»å…¥', logout: 'ç™»å‡º', create: 'å»ºç«‹ç´€éŒ„', edit: 'é–‹å•Ÿç·¨è¼¯', update: 'æ›´æ–°ç´€éŒ„', delete: 'åˆªé™¤ç´€éŒ„',
+  plan_image_save: 'å„²å­˜è¨ˆç•«åœ–é¢', plan_pdf_save: 'å„²å­˜è¨ˆç•«æ›¸ PDF', invite_create: 'ç™¼å‡ºé‚€è«‹',
+  invite_revoke: 'æ’¤éŠ·é‚€è«‹', invite_accept: 'æ¥å—é‚€è«‹', member_role: 'èª¿æ•´è§’è‰²', member_enable: 'å•Ÿç”¨å¸³è™Ÿ', member_disable: 'åœç”¨å¸³è™Ÿ',
+};
+
+function formatTime(value: any) {
+  return value?.toDate
+    ? new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(value.toDate())
+    : 'æ™‚é–“åŒæ­¥ä¸­';
+}
+
+export default function ActivityLog() {
+  const [entries, setEntries] = useState<any[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [more, setMore] = useState(true);
+  const [cursor, setCursor] = useState<QueryDocumentSnapshot>();
+
+  async function load(reset = false) {
+    if (!db || busy) return;
+    setBusy(true); setError('');
+    try {
+      const result = await getDocs(query(collection(db, 'activityLogs'), orderBy('timestamp', 'desc'), ...(!reset && cursor ? [startAfter(cursor)] : []), limit(50)));
+      const rows = result.docs.map((item) => ({ id: item.id, ...item.data() }));
+      setEntries((current) => reset ? rows : [...current, ...rows]);
+      setCursor(result.docs.at(-1));
+      setMore(result.size === 50);
+    } catch {
+      setError('ç„¡æ³•è®€å–æ“ä½œç´€éŒ„ï¼Œè«‹ç¢ºèªç›®å‰å¸³è™Ÿå…·æœ‰ Owner æˆ–ç³»çµ±ç®¡ç†è€…æ¬Šé™ã€‚');
+    } finally { setBusy(false); }
+  }
+
+  useEffect(() => { void load(true); }, []);
+
+  return (
+    <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1440, mx: 'auto' }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' }, mb: 3 }}>
+        <Box><Typography variant="h4">ç™»å…¥èˆ‡æ“ä½œç´€éŒ„</Typography><Typography color="text.secondary">å°ç£æ™‚é–“ï¼ˆUTC+8ï¼‰ï¼Œæ¯æ¬¡è¼‰å…¥ 50 ç­†</Typography></Box>
+        <Button variant="outlined" startIcon={busy ? <CircularProgress size={16} /> : <RefreshRounded />} disabled={busy} onClick={() => load(true)}>é‡æ–°æ•´ç†</Button>
+      </Stack>
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      <TableContainer component={Paper} variant="outlined">
+        <Table>
+          <TableHead><TableRow><TableCell>æ™‚é–“</TableCell><TableCell>ç™»å…¥è€…</TableCell><TableCell>æ“ä½œ</TableCell><TableCell>å°è±¡</TableCell></TableRow></TableHead>
+          <TableBody>
+            {entries.map((entry) => <TableRow key={entry.id} hover><TableCell sx={{ whiteSpace: 'nowrap' }}>{formatTime(entry.timestamp)}</TableCell><TableCell>{entry.actorName || 'â€”'}<Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{entry.actorEmail}</Typography></TableCell><TableCell><Chip size="small" label={labels[entry.action] || entry.action} /></TableCell><TableCell>{entry.recordTitle || 'â€”'}{entry.recordId && <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{entry.recordId}</Typography>}</TableCell></TableRow>)}
+            {!entries.length && !busy && <TableRow><TableCell colSpan={4} align="center">å°šç„¡ç™»å…¥æˆ–æ“ä½œç´€éŒ„ã€‚</TableCell></TableRow>}
+          </TableBody>
+        </Table>
+      </TableContainer>
+      {more && entries.length > 0 && <Button sx={{ mt: 2 }} disabled={busy} onClick={() => load(false)}>è¼‰å…¥æ›´æ—©ç´€éŒ„</Button>}
+    </Box>
+  );
+}
