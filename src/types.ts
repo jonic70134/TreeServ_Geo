@@ -1,0 +1,52 @@
+export type RoutePoint = { lat: number; lng: number };
+
+export type WorkRecord = {
+  id: string;
+  locationId: string;
+  authorId?: string;
+  authorName: string;
+  title: string;
+  notes: string;
+  imageUrls: string[];
+  youtubeUrls: string[];
+  fileUrls: string[];
+  routePoints?: RoutePoint[];
+  routeNotes?: string;
+  sourceImported?: boolean;
+  createdAt?: any;
+  dateLabel?: string;
+  workDate?: string;
+  endDate?: string;
+  crew?: string[];
+  meetingTime?: string;
+  meetingPlace?: string;
+  mapUrl?: string;
+  weather?: string;
+  hospitalName?: string;
+  hospitalPhone?: string;
+  hospitalDistance?: string;
+  hospitalTravelTime?: string;
+  workDetails?: string;
+  assignments?: string;
+  crane?: string;
+  disposal?: string;
+  parking?: string;
+  roadPermit?: string;
+  equipment?: string;
+  safetyNotes?: string;
+};
+
+export type SiteLocation = {
+  id: string;
+  name: string;
+  address: string;
+  lat: number;
+  lng: number;
+  status: string;
+  attention: string;
+  aliases: string[];
+  records?: WorkRecord[];
+  isDemo?: boolean;
+  updatedAt?: any;
+  createdBy?: string;
+};

@@ -1,20 +1,23 @@
 # TreeServ Geo
 
-TreeServ Geo 是以地圖為中心的案場工作紀錄系統。前端主要介面使用 Vue 3，透過 Firebase Authentication 提供 Google 登入，並以 Cloud Firestore 保存地點與工作時間軸。
+TreeServ Geo 是以地圖為中心的案場工作紀錄系統。介面採 React 19、Material UI 與 Vinext，透過 Firebase Authentication 確認 Google 帳號身分，並由 Cloud Firestore 邀請名單與成員角色決定實際存取權。
 
 ## 已包含的功能
 
 - OpenStreetMap 預設地圖、目前位置與地址自動定位（Google Maps 入口保留）
 - 每筆工作紀錄可保存 A → 途經點 → B 手動進場路線、方向箭頭與進場說明；點選路線後可拖曳調整，最多 100 點
-- Owner 可編輯及刪除所有工作紀錄；User 僅可編輯本人紀錄。更新及刪除皆需再次確認，更新保留原作者
-- Owner 專用登入與操作紀錄頁，按時間倒序，每次載入 50 筆，以台灣時間顯示至秒
+- 僅限 Owner 或系統管理者邀請的 Google 帳號登入；邀請信箱必須與登入帳號完全相同
+- Owner 可管理管理者與一般使用者；系統管理者可邀請、啟用及停用一般使用者
+- Owner 與系統管理者可編輯所有工作紀錄；一般使用者僅可編輯本人紀錄。Owner 可刪除，更新及刪除皆需再次確認
+- Owner 與系統管理者可檢視登入與操作紀錄，按時間倒序，每次載入 50 筆，以台灣時間顯示至秒
 - Owner 專用修剪計畫書工作頁，整理人事時地物、業主需求、聯絡窗口與現場限制
 - 現場照片可使用畫筆、弧線、方向箭頭與圈選工具標註；圖面與計畫書 PDF 可分別保存到指定的 Google Drive 專案資料夾
 - 已記錄地點的即時搜尋與 autocomplete
 - 地點注意事項及歷史工作時間軸
 - 文字、圖片 URL、YouTube 嵌入與檔案 URL
 - Firestore 即時更新與未設定服務時的示範模式
-- Owner / User / Guest 權限，並保留 editor、manager 等角色擴充點
+- Material UI 全站元件、統一主題與桌機／平板／手機響應式版面
+- Owner / Admin / User 三種角色；匿名、未受邀及停用帳號無資料讀取權
 - Owner：`jonic70134@gmail.com`
 
 ## Firebase 設定
@@ -29,8 +32,10 @@ TreeServ Geo 是以地圖為中心的案場工作紀錄系統。前端主要介�
 
 - `locations/{locationId}`：名稱、地址、座標、狀態、注意事項、別名與建立者。
 - `workRecords/{recordId}`：地點 ID、文字內容、圖片 URL、YouTube URL、檔案 URL、作者與時間。
-- `users/{uid}`：預留角色與個人資料；一般登入帳號預設為 user。
-- `activityLogs/{id}`：帳號、登入／登出／開啟編輯／建立／更新／刪除及計畫圖面／PDF 儲存事件與伺服器時間。僅 Owner 可讀，客戶端無法修改或刪除。
+- `accessInvites/{email}`：以小寫 Google 電子郵件作為文件 ID，保存受邀角色、邀請人及接受狀態。
+- `members/{uid}`：已接受邀請的帳號、角色與啟用狀態；Owner 本身不依賴此文件。
+- `users/{uid}`：舊版相容資料，新的授權判斷以 `members` 為準。
+- `activityLogs/{id}`：帳號、登入／登出、邀請／角色異動、開啟編輯、建立／更新／刪除及計畫圖面／PDF 儲存事件與伺服器時間。Owner 與系統管理者可讀，客戶端無法修改或刪除。
 - `recordDeletions/{recordId}`：刪除的稽核收據，與工作紀錄刪除及操作紀錄以同一批次提交；不保留完整紀錄內容，不能用於還原。
 - `importedRecordStates/{recordId}`：匯入紀錄的刪除標記，讓所有裝置持續隱藏已刪除的匯入項目；不含帳號資料。原始匯入素材仍留在程式來源。
 
@@ -42,7 +47,7 @@ TreeServ Geo 是以地圖為中心的案場工作紀錄系統。前端主要介�
 
 ## 權限測試
 
-以 `demo-treeserv` 專案啟動本機 Firestore Emulator（127.0.0.1:8088），執行 `npm run test:rules`。測試僅操作模擬器資料，涵蓋訪客讀取、Owner 跨作者修改、本人修改限制、作者保留、路線保存、稽核不可變及原子刪除。
+以 `demo-treeserv` 專案啟動本機 Firestore Emulator（127.0.0.1:8088），執行 `npm run test:rules`。測試僅操作模擬器資料，涵蓋未受邀與停用帳號阻擋、邀請接受、Owner／管理者角色邊界、本人修改限制、作者保留、路線保存、稽核不可變及原子刪除。
 
 ## Google Maps 設定
 

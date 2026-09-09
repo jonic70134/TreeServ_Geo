@@ -22,12 +22,11 @@ function driveError(status: number) {
 }
 
 async function driveFetch<T>(url: string, accessToken: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set('Authorization', `Bearer ${accessToken}`);
   const response = await fetch(url, {
     ...init,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
   if (!response.ok) throw driveError(response.status);
   return response.json() as Promise<T>;
@@ -89,4 +88,3 @@ export async function uploadDriveFile(
     },
   );
 }
-

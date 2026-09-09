@@ -1,4 +1,4 @@
-import VueShell from './vue-shell';
+import MaterialShell from './material-shell';
 import type { TreeServRuntimeConfig } from '../src/runtime-config';
 
 export default function Home() {
@@ -16,5 +16,5 @@ export default function Home() {
     googleMapId: process.env.VITE_GOOGLE_MAP_ID ?? '',
   };
 
-  return <VueShell runtimeConfig={runtimeConfig} />;
+  return <MaterialShell runtimeConfig={runtimeConfig} />;
 }
