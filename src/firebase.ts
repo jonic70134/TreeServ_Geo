@@ -19,13 +19,28 @@ import {
 } from 'firebase/firestore';
 import { getRuntimeConfig } from './runtime-config';
 
-const config = getRuntimeConfig()?.firebase ?? {
+const configuredFirebase = getRuntimeConfig()?.firebase ?? {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
+};
+
+// Firebase's popup helper normally lives on firebaseapp.com. Browsers that
+// partition third-party storage can then lose the popup's initial state while
+// switching Google accounts. Hosted builds proxy /__/auth/* on the current
+// origin, so point Auth at that same origin and keep the Firebase domain for
+// local development where the proxy is not available.
+const usesHostedAuthProxy =
+  typeof window !== 'undefined' &&
+  window.location.protocol === 'https:' &&
+  !['localhost', '127.0.0.1'].includes(window.location.hostname);
+
+const config = {
+  ...configuredFirebase,
+  authDomain: usesHostedAuthProxy ? window.location.host : configuredFirebase.authDomain,
 };
 
 export const firebaseReady = Boolean(config.apiKey && config.projectId && config.authDomain);
