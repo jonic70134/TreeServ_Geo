@@ -37,7 +37,7 @@ service cloud.firestore {
     }
 
     function allowedInviteRole(role) {
-      return role == 'user' || (role == 'admin' && isOwner());
+      return role in ['admin', 'user'];
     }
 
     function validRecordAudit(recordId, action) {
@@ -74,7 +74,7 @@ service cloud.firestore {
       allow update: if hasAccess()
         && (isAdmin() || resource.data.createdBy == request.auth.uid)
         && request.resource.data.createdBy == resource.data.createdBy;
-      allow delete: if isOwner();
+      allow delete: if isAdmin();
     }
 
     match /workRecords/{recordId} {
@@ -85,7 +85,7 @@ service cloud.firestore {
         && request.resource.data.title.size() <= 500
         && (
           validRecordAudit(recordId, 'create')
-          || (isOwner() && request.resource.data.sourceImported == true && validRecordAudit(recordId, 'update'))
+          || (isAdmin() && request.resource.data.sourceImported == true && validRecordAudit(recordId, 'update'))
         );
       allow update: if hasAccess()
         && (isAdmin() || resource.data.authorId == request.auth.uid)
@@ -96,7 +96,7 @@ service cloud.firestore {
         && request.resource.data.title is string
         && request.resource.data.title.size() <= 500
         && validRecordAudit(recordId, 'update');
-      allow delete: if isOwner()
+      allow delete: if isAdmin()
         && getAfter(/databases/$(database)/documents/recordDeletions/$(recordId)).data.timestamp == request.time
         && getAfter(/databases/$(database)/documents/recordDeletions/$(recordId)).data.actorId == request.auth.uid;
     }
@@ -108,7 +108,7 @@ service cloud.firestore {
           && hasAccess()
           && request.resource.data.recordId == '')
         || (request.resource.data.action in ['plan_image_save', 'plan_pdf_save']
-          && isOwner()
+          && isAdmin()
           && request.resource.data.recordId == '')
         || (request.resource.data.action == 'invite_accept'
           && request.resource.data.recordId == request.auth.uid
@@ -129,7 +129,7 @@ service cloud.firestore {
           && getAfter(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId)).data.lastAuditId == entryId
           && getAfter(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId)).data.updatedAt == request.time)
         || (request.resource.data.action == 'delete'
-          && isOwner()
+          && isAdmin()
           && getAfter(/databases/$(database)/documents/recordDeletions/$(request.resource.data.recordId)).data.auditId == entryId
           && (exists(/databases/$(database)/documents/workRecords/$(request.resource.data.recordId))
             || getAfter(/databases/$(database)/documents/importedRecordStates/$(request.resource.data.recordId)).data.deleted == true)
@@ -166,7 +166,6 @@ service cloud.firestore {
         isOwner()
         && resource.data.email == inviteEmail
         && resource.data.status == 'pending'
-        && (resource.data.role == 'user' || isOwner())
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
         && request.resource.data.status == 'revoked'
         && request.resource.data.updatedAt == request.time
@@ -215,16 +214,14 @@ service cloud.firestore {
           isOwner()
           || (isActiveMember()
             && member().role == 'admin'
-            && memberId != request.auth.uid
-            && resource.data.role == 'user'
-            && request.resource.data.role == 'user')
+            && memberId != request.auth.uid)
         );
-      allow delete: if isOwner();
+      allow delete: if isAdmin() && memberId != request.auth.uid;
     }
 
     match /recordDeletions/{recordId} {
       allow read: if isAdmin();
-      allow create: if isOwner()
+      allow create: if isAdmin()
         && request.resource.data.actorId == request.auth.uid
         && request.resource.data.recordId == recordId
         && request.resource.data.timestamp == request.time
@@ -238,7 +235,7 @@ service cloud.firestore {
 
     match /importedRecordStates/{recordId} {
       allow read: if hasAccess();
-      allow create: if isOwner()
+      allow create: if isAdmin()
         && request.resource.data.keys().hasOnly(['deleted', 'updatedAt', 'auditId'])
         && request.resource.data.deleted == true
         && request.resource.data.updatedAt == request.time
@@ -250,8 +247,8 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAdmin() || (hasAccess() && request.auth.uid == userId);
       allow create: if hasAccess() && request.auth.uid == userId && request.resource.data.role == 'user';
-      allow update: if isOwner() || (hasAccess() && request.auth.uid == userId && request.resource.data.role == resource.data.role);
-      allow delete: if isOwner();
+      allow update: if isAdmin() || (hasAccess() && request.auth.uid == userId && request.resource.data.role == resource.data.role);
+      allow delete: if isAdmin();
     }
 
     match /invitations/{invitationId} {
