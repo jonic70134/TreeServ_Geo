@@ -1,6 +1,6 @@
-type ImportedRecord = Record<string, unknown>;
+type ImportedRecord = Record<string, unknown> & { title:string; notes:string };
 
-function record(id:string, locationId:string, fields:ImportedRecord){
+function record<T extends ImportedRecord>(id:string, locationId:string, fields:T){
   return { id, locationId, imageUrls:[], youtubeUrls:[], fileUrls:[], authorName:'群組案場紀錄', ...fields };
 }
 
