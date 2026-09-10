@@ -10,14 +10,10 @@ service cloud.firestore {
       return signedIn() && request.auth.token.email == 'jonic70134@gmail.com';
     }
 
-    // Authenticated accounts default to user. A future custom `role` claim can
-    // add editor/manager roles without changing the data model.
+    // Work content is collaborative, but administrative and invitation
+    // authority is reserved for the single owner email above.
     function canWrite() {
-      return signedIn() && (
-        isOwner() ||
-        !('role' in request.auth.token) ||
-        request.auth.token.role in ['user', 'editor', 'manager', 'owner']
-      );
+      return signedIn();
     }
 
     match /locations/{locationId} {
@@ -37,8 +33,15 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if signedIn();
       allow create: if signedIn() && request.auth.uid == userId && request.resource.data.role == 'user';
-      allow update: if isOwner() || (signedIn() && request.auth.uid == userId && request.resource.data.role == resource.data.role);
+      allow update: if isOwner() || (
+        signedIn() && request.auth.uid == userId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'photoURL'])
+      );
       allow delete: if isOwner();
+    }
+
+    match /invitations/{invitationId} {
+      allow read, create, update, delete: if isOwner();
     }
   }
 }

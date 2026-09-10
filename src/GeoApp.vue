@@ -23,6 +23,7 @@ const searchOpen = ref(false);
 const focusedSuggestion = ref(0);
 const searchInput = ref<HTMLInputElement | null>(null);
 const showCreate = ref(false);
+const mobileMenuOpen = ref(false);
 const editing = ref<WorkRecord | null>(null);
 const creatingForActive = ref(false);
 const user = ref<User | null>(null);
@@ -34,6 +35,9 @@ const markers = ref<any[]>([]);
 const markerByLocation = new Map<string, { open: () => void }>();
 const weatherLoading = ref(false);
 const cleanupLoading = ref(false);
+const routeLoading = ref(false);
+const geocodedAddress = ref('');
+let routeLayer:any = null;
 let authStop: undefined | (() => void);
 let locationsStop: undefined | (() => void);
 let recordsStop: undefined | (() => void);
@@ -53,6 +57,40 @@ function locationRecords(location:Location){
 function normalizeSearch(value:string){
   return value.normalize('NFKC').toLocaleLowerCase('zh-TW').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
 }
+function localDate(value:string){
+  const iso=value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  const slash=value.match(/^(\d{1,2})\/(\d{1,2})(?:\D.*)?$/);
+  if(iso) return new Date(Number(iso[1]),Number(iso[2])-1,Number(iso[3]));
+  if(slash) return new Date(new Date().getFullYear(),Number(slash[1])-1,Number(slash[2]));
+  return null;
+}
+function recordStart(record:WorkRecord){ return localDate(record.workDate || record.dateLabel || ''); }
+function recordEnd(record:WorkRecord){ return localDate(record.endDate || record.workDate || record.dateLabel || ''); }
+function formatDate(value?:string){
+  if(!value) return '';
+  const date=localDate(value);
+  if(!date) return value;
+  return new Intl.DateTimeFormat('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'}).format(date);
+}
+function locationSchedule(location:Location){
+  return locationRecords(location).map((record)=>({start:recordStart(record),end:recordEnd(record)})).filter((range)=>range.start).sort((a,b)=>a.start!.getTime()-b.start!.getTime());
+}
+function effectiveStatus(location:Location){
+  if(location.status==='已完成') return '已完成';
+  const schedule=locationSchedule(location); if(!schedule.length) return ['進行中','待驗收','待複查'].includes(location.status) ? location.status : '待排程';
+  const today=new Date(); today.setHours(0,0,0,0);
+  if(schedule.some(({start,end})=>start!.getTime()<=today.getTime() && (end ?? start)!.getTime()>=today.getTime())) return '進行中';
+  if(schedule.some(({start})=>start!.getTime()>today.getTime())) return '即將開始';
+  return location.status==='待複查' ? '待複查' : '待驗收';
+}
+function sortTimestamp(location:Location){
+  const schedule=locationSchedule(location); const now=new Date(); now.setHours(0,0,0,0);
+  const upcoming=schedule.find(({start})=>start!.getTime()>=now.getTime());
+  if(upcoming) return {group:0,time:upcoming.start!.getTime()};
+  const latest=schedule.at(-1)?.start;
+  return latest ? {group:1,time:-latest.getTime()} : {group:2,time:0};
+}
+const displayedLocations=computed(()=>[...locations.value].sort((a,b)=>{const aa=sortTimestamp(a),bb=sortTimestamp(b);return aa.group-bb.group||aa.time-bb.time||a.name.localeCompare(b.name,'zh-TW');}));
 const suggestions = computed(() => {
   const needle = normalizeSearch(searchText.value);
   if (!needle) return locations.value.slice(0,6).map((location,index)=>({location,context:location.address,score:100-index}));
@@ -105,7 +143,7 @@ function linkify(value?:string){
   }
   return output+escapeHtml(value.slice(lastIndex));
 }
-function recordTabLabel(record:WorkRecord,index:number){ return record.workDate || record.dateLabel || `第 ${index+1} 天`; }
+function recordTabLabel(record:WorkRecord,index:number){ return formatDate(record.workDate || record.dateLabel) || `第 ${index+1} 天`; }
 function combinedSafety(record:WorkRecord){ return [activeLocation.value?.attention,record.safetyNotes].filter(Boolean).join('\n'); }
 function youtubeId(url:string){ const match=url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([\w-]{11})/); return match?.[1] ?? ''; }
 function fileName(url:string){ try { return decodeURIComponent(new URL(url).pathname.split('/').pop() || '開啟附件'); } catch { return '開啟附件'; } }
@@ -114,16 +152,17 @@ function createPopupContent(place:Location){
   const content=document.createElement('div'); content.className='map-popup-content';
   const title=document.createElement('strong'); title.textContent=place.name; content.appendChild(title);
   const address=document.createElement('p'); address.textContent=place.address; content.appendChild(address);
-  const meta=document.createElement('span'); meta.textContent=`${locationRecordCount(place)} 筆紀錄 · ${place.status}`; content.appendChild(meta);
+  const meta=document.createElement('span'); meta.textContent=`${locationRecordCount(place)} 筆紀錄 · ${effectiveStatus(place)}`; content.appendChild(meta);
   if(place.attention){ const attention=document.createElement('small'); attention.textContent=`注意：${place.attention}`; content.appendChild(attention); }
   return content;
 }
 function selectLocation(place:Location){
-  activeId.value=place.id; searchText.value=place.name; searchOpen.value=false;
+  clearRoute(); activeId.value=place.id; searchText.value=place.name; searchOpen.value=false; mobileMenuOpen.value=false;
   if(mapProvider.value==='leaflet') map.value?.setView?.([place.lat,place.lng],16,{animate:true});
   else { map.value?.panTo?.({lat:place.lat,lng:place.lng}); map.value?.setZoom?.(16); }
   markerByLocation.get(place.id)?.open();
 }
+function selectLocationById(event:Event){const place=locations.value.find((item)=>item.id===(event.target as HTMLSelectElement).value);if(place)selectLocation(place);}
 function onSearchInput(){ searchOpen.value=true; focusedSuggestion.value=0; }
 function moveSuggestion(direction:number){
   if(!searchOpen.value) searchOpen.value=true;
@@ -177,14 +216,44 @@ async function drawMarkers(){
     marker.addListener('click',()=>selectLocation(place)); markers.value.push(marker); markerByLocation.set(place.id,{open:()=>info.open({anchor:marker,map:map.value})});
   });
 }
+function clearRoute(){
+  if(routeLayer){ routeLayer.setMap?.(null); routeLayer.remove?.(); routeLayer=null; }
+}
+function drivingDirectionsUrl(record:WorkRecord){
+  if(!activeLocation.value||!record.hospitalName)return '';
+  return `https://www.google.com/maps/dir/?api=1&origin=${activeLocation.value.lat},${activeLocation.value.lng}&destination=${encodeURIComponent(record.hospitalName)}&travelmode=driving`;
+}
+async function showHospitalRoute(record:WorkRecord){
+  if(!activeLocation.value||!record.hospitalName)return;
+  routeLoading.value=true; clearRoute();
+  try{
+    const origin={lat:activeLocation.value.lat,lng:activeLocation.value.lng};
+    if(mapProvider.value==='google'){
+      const {DirectionsService,DirectionsRenderer}=await importLibrary('routes') as any;
+      const result=await new DirectionsService().route({origin,destination:record.hospitalName,travelMode:'DRIVING'});
+      routeLayer=new DirectionsRenderer({map:map.value,suppressMarkers:false,polylineOptions:{strokeColor:'#e7653b',strokeWeight:6}}); routeLayer.setDirections(result);
+    }else{
+      const query=`${record.hospitalName} 台灣`;
+      const geo=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=tw&q=${encodeURIComponent(query)}`,{headers:{'Accept-Language':'zh-TW'}}).then((response)=>response.json());
+      if(!geo[0])throw new Error('hospital');
+      const destination={lat:Number(geo[0].lat),lng:Number(geo[0].lon)};
+      const route=await fetch(`https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson`).then((response)=>response.json());
+      const coordinates=route.routes?.[0]?.geometry?.coordinates; if(!coordinates)throw new Error('route');
+      routeLayer=L.geoJSON({type:'LineString',coordinates} as any,{style:{color:'#e7653b',weight:6,opacity:.9}}).addTo(map.value);
+      map.value.fitBounds(routeLayer.getBounds(),{padding:[34,34]});
+    }
+    notify('已顯示開車路線');
+  }catch{notify('暫時無法在地圖顯示路線，可改用外部導航');}finally{routeLoading.value=false;}
+}
 function locateMe(){ navigator.geolocation?.getCurrentPosition(({coords})=>{ map.value?.panTo({lat:coords.latitude,lng:coords.longitude}); map.value?.setZoom(16); notify('已移動到目前位置'); },()=>notify('無法取得位置，請檢查瀏覽器權限')); }
 async function geocodeAddress(){
   if(!form.address) return;
   try{
-    if(isGoogleReady.value){ const {Geocoder}=await importLibrary('geocoding') as any; const result=await new Geocoder().geocode({address:form.address,region:'TW'}); const point=result.results[0]?.geometry.location; if(point){form.lat=point.lat();form.lng=point.lng();notify('已自動定位地點');if(form.workDate)await fetchWeather();return;} }
-    else { const response=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=tw&q=${encodeURIComponent(form.address)}`,{headers:{'Accept-Language':'zh-TW'}}); const result=await response.json(); if(result[0]){form.lat=Number(result[0].lat);form.lng=Number(result[0].lon);map.value?.setView?.([form.lat,form.lng],16);notify('已自動定位地點');if(form.workDate)await fetchWeather();return;} }
+    if(isGoogleReady.value){ const {Geocoder}=await importLibrary('geocoding') as any; const result=await new Geocoder().geocode({address:form.address,region:'TW'}); const point=result.results[0]?.geometry.location; if(point){form.lat=point.lat();form.lng=point.lng();geocodedAddress.value=form.address.trim();notify('已自動定位地點');if(form.workDate)await fetchWeather();return true;} }
+    else { const response=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=tw&q=${encodeURIComponent(form.address)}`,{headers:{'Accept-Language':'zh-TW'}}); const result=await response.json(); if(result[0]){form.lat=Number(result[0].lat);form.lng=Number(result[0].lon);geocodedAddress.value=form.address.trim();map.value?.setView?.([form.lat,form.lng],16);notify('已自動定位地點');if(form.workDate)await fetchWeather();return true;} }
     notify('找不到這個地址，請確認後再試');
   }catch{ notify('找不到這個地址，請確認後再試'); }
+  return false;
 }
 
 function weatherDescription(code:number){
@@ -207,7 +276,7 @@ async function fetchWeather(){
   }catch{notify('暫時無法取得預報，仍可手動填寫');}finally{weatherLoading.value=false;}
 }
 
-function resetForm(){ Object.assign(form,{name:'',address:'',status:'進行中',attention:'',title:'',notes:'',imageUrls:'',youtubeUrls:'',fileUrls:'',lat:25.0684,lng:121.6158,...structuredClone(emptyRecordFields)}); editing.value=null; creatingForActive.value=false; }
+function resetForm(){ Object.assign(form,{name:'',address:'',status:'進行中',attention:'',title:'',notes:'',imageUrls:'',youtubeUrls:'',fileUrls:'',lat:25.0684,lng:121.6158,...structuredClone(emptyRecordFields)}); geocodedAddress.value=''; editing.value=null; creatingForActive.value=false; }
 function openCreate(forActive=false){
   if(firebaseReady && !user.value){ notify('登入後即可建立工作紀錄'); return; }
   if(forActive && activeLocation.value?.isDemo){ notify('群組匯入紀錄為唯讀，請從上方建立新案場'); return; }
@@ -223,6 +292,10 @@ function openEdit(record:WorkRecord){
 
 async function saveRecord(){
   if(!form.title.trim() || !form.notes.trim()){ notify('請填寫紀錄標題與工作內容'); return; }
+  if(form.workDate&&form.endDate&&form.endDate<form.workDate){notify('結束日期不可早於施工起始日期');return;}
+  if(!editing.value&&!creatingForActive&&geocodedAddress.value!==form.address.trim()){
+    const located=await geocodeAddress(); if(!located)return;
+  }
   const payload={title:form.title.trim(),notes:form.notes.trim(),workDate:form.workDate,endDate:form.endDate,crew:[...form.crew],meetingTime:form.meetingTime.trim(),meetingPlace:form.meetingPlace.trim(),mapUrl:form.mapUrl.trim(),weather:form.weather.trim(),hospitalName:form.hospitalName.trim(),hospitalPhone:form.hospitalPhone.trim(),hospitalDistance:form.hospitalDistance.trim(),hospitalTravelTime:form.hospitalTravelTime.trim(),workDetails:form.workDetails.trim(),assignments:form.assignments.trim(),crane:form.crane.trim(),disposal:form.disposal.trim(),parking:form.parking.trim(),roadPermit:form.roadPermit.trim(),equipment:form.equipment.trim(),safetyNotes:form.safetyNotes.trim(),imageUrls:cleanUrls(form.imageUrls),youtubeUrls:cleanUrls(form.youtubeUrls),fileUrls:cleanUrls(form.fileUrls),authorId:user.value?.uid ?? 'demo',authorName:user.value?.displayName || user.value?.email || '示範使用者',updatedAt:serverTimestamp()};
   try{
     if(editing.value){
@@ -232,10 +305,12 @@ async function saveRecord(){
     }else{
       let locationId=activeLocation.value?.id;
       if(form.name.trim()){
-        locationId=crypto.randomUUID();
+        const sameLocation=locations.value.find((location)=>!location.isDemo&&(normalizeSearch(location.name)===normalizeSearch(form.name)||normalizeSearch(location.address)===normalizeSearch(form.address)));
+        const shouldMerge=sameLocation&&window.confirm(`已存在「${sameLocation.name}」。是否將這筆工作紀錄合併到現有案場？`);
+        if(shouldMerge) locationId=sameLocation.id;
+        else locationId=crypto.randomUUID();
         const locationPayload={name:form.name.trim(),address:form.address.trim(),lat:form.lat,lng:form.lng,status:form.status,attention:form.attention.trim(),aliases:[],createdBy:user.value?.uid ?? 'demo',createdAt:serverTimestamp(),updatedAt:serverTimestamp()};
-        if(db) await setDoc(doc(db,'locations',locationId),locationPayload);
-        else locations.value.unshift({id:locationId,...locationPayload,records:[]} as Location);
+        if(!shouldMerge){if(db) await setDoc(doc(db,'locations',locationId),locationPayload);else locations.value.unshift({id:locationId,...locationPayload,records:[]} as Location);}
       }
       const recordPayload={...payload,locationId,createdAt:serverTimestamp()};
       if(db) await addDoc(collection(db,'workRecords'),recordPayload);
@@ -249,8 +324,19 @@ async function saveRecord(){
 async function removeRecord(record:WorkRecord){
   if(role.value!=='owner') return;
   if(!window.confirm(`確定刪除「${record.title}」？`)) return;
-  if(db) await deleteDoc(doc(db,'workRecords',record.id)); else records.value=records.value.filter((item)=>item.id!==record.id);
-  notify('紀錄已刪除');
+  const removeEmptyLocation=Boolean(activeLocation.value&&!activeLocation.value.isDemo&&activeRecords.value.length===1);
+  if(db){const batch=writeBatch(db);batch.delete(doc(db,'workRecords',record.id));if(removeEmptyLocation)batch.delete(doc(db,'locations',record.locationId));await batch.commit();}
+  else {records.value=records.value.filter((item)=>item.id!==record.id);if(removeEmptyLocation)locations.value=locations.value.filter((item)=>item.id!==record.locationId);}
+  clearRoute(); if(removeEmptyLocation)activeId.value=displayedLocations.value[0]?.id??'';
+  notify(removeEmptyLocation?'紀錄與空案場地標已刪除':'紀錄已刪除');
+}
+function calendarUrl(record:WorkRecord){
+  const start=recordStart(record); if(!start||!activeLocation.value)return '';
+  const finish=recordEnd(record)??start; const exclusiveEnd=new Date(finish);exclusiveEnd.setDate(exclusiveEnd.getDate()+1);
+  const stamp=(date:Date)=>`${date.getFullYear()}${String(date.getMonth()+1).padStart(2,'0')}${String(date.getDate()).padStart(2,'0')}`;
+  const details=[record.notes,record.meetingTime&&`集合時間：${record.meetingTime}`,record.meetingPlace&&`集合地點：${record.meetingPlace}`,record.mapUrl].filter(Boolean).join('\n');
+  const params=new URLSearchParams({action:'TEMPLATE',text:`${activeLocation.value.name}｜${record.title}`,dates:`${stamp(start)}/${stamp(exclusiveEnd)}`,details,location:activeLocation.value.address});
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 async function purgeLegacyData(){
   if(role.value!=='owner'||!db||cleanupLoading.value)return;
@@ -288,16 +374,23 @@ watch(()=>`${activeId.value}:${activeRecords.value.map((record)=>record.id).join
         <label class="global-search"><span>⌕</span><input ref="searchInput" v-model="searchText" @focus="searchOpen=true" @input="onSearchInput" @keydown.down.prevent="moveSuggestion(1)" @keydown.up.prevent="moveSuggestion(-1)" @keydown.enter.prevent="chooseFocusedSuggestion" @keydown.escape="searchOpen=false" placeholder="搜尋地點、地址、注意事項或紀錄…" aria-label="搜尋已記錄地點" role="combobox" aria-autocomplete="list" :aria-expanded="searchOpen" aria-controls="location-result"><kbd>⌘ K</kbd></label>
         <div v-if="searchOpen" id="location-result" class="suggestions" role="listbox"><button v-for="(item,index) in suggestions" :key="item.location.id" :class="{focused:index===focusedSuggestion}" role="option" :aria-selected="index===focusedSuggestion" @mouseenter="focusedSuggestion=index" @click="selectLocation(item.location)"><span class="mini-pin">⌖</span><span><strong>{{item.location.name}}</strong><small>{{item.context}}</small></span><em>{{locationRecordCount(item.location)}} 筆</em></button><p v-if="!suggestions.length">找不到符合「{{searchText.trim()}}」的地點或紀錄</p></div>
       </div>
-      <button class="primary-action" @click="openCreate(false)"><span>＋</span>建立工作紀錄</button>
+      <button class="primary-action desktop-create" @click="openCreate(false)"><span>＋</span>建立工作紀錄</button>
       <button v-if="!user" class="login-button" @click="login">使用 Google 登入</button>
       <button v-else class="account-button" @click="logout" :title="`${user.email}（點擊登出）`">{{user.displayName?.slice(0,1) || user.email?.slice(0,1)}}<span>{{role==='owner'?'Owner':'User'}}</span></button>
+      <button class="mobile-menu-button" type="button" :aria-expanded="mobileMenuOpen" aria-controls="mobile-menu" @click="mobileMenuOpen=!mobileMenuOpen"><span>☰</span>選單</button>
+      <div v-if="mobileMenuOpen" id="mobile-menu" class="mobile-menu">
+        <label>切換案場<select :value="activeLocation?.id" @change="selectLocationById"><option v-for="place in displayedLocations" :key="place.id" :value="place.id">{{place.name}}</option></select></label>
+        <button class="mobile-create" @click="openCreate(false);mobileMenuOpen=false">＋ 建立工作紀錄</button>
+        <button v-if="!user" class="mobile-account" @click="login">使用 Google 登入</button>
+        <button v-else class="mobile-account" @click="logout">{{user.email}} · 登出</button>
+      </div>
     </header>
 
     <section class="workspace">
       <aside class="places-panel">
         <div class="panel-heading"><div><small>工作地點</small><strong>{{locations.length}} 個案場</strong></div><span class="sync-state"><i/>{{firebaseReady?'即時同步':'離線預覽'}}</span></div>
-        <div class="place-list"><button v-for="(place,index) in locations" :key="place.id" :class="['place-row',{active:place.id===activeLocation?.id,warn:place.status.includes('注意')} ]" @click="selectLocation(place)"><span class="place-index">{{String(index+1).padStart(2,'0')}}</span><span><strong>{{place.name}}</strong><small>{{locationRecordCount(place)}} 筆紀錄 · {{place.status}}</small></span><b v-if="place.status.includes('注意')">!</b></button></div>
-        <div class="permission-card"><strong>權限說明</strong><p><b>訪客</b> 可查看；<b>User</b> 可建立與編輯；<b>Owner</b> 可完整管理與刪除。</p><button v-if="role==='owner'&&legacyLocationCount" class="cleanup-button" :disabled="cleanupLoading" @click="purgeLegacyData">{{cleanupLoading?'清理中…':`清除 ${legacyLocationCount} 個舊格式案場`}}</button></div>
+        <div class="place-list"><button v-for="(place,index) in displayedLocations" :key="place.id" :class="['place-row',{active:place.id===activeLocation?.id}]" @click="selectLocation(place)"><span class="place-index">{{String(index+1).padStart(2,'0')}}</span><span><strong>{{place.name}}</strong><small>{{locationRecordCount(place)}} 筆紀錄 · {{effectiveStatus(place)}}</small></span></button></div>
+        <div class="permission-card"><strong>權限說明</strong><p><b>訪客</b> 可查看；登入者可建立與編輯；僅 <b>jonic70134@gmail.com</b> 可管理權限與刪除。</p><button v-if="role==='owner'&&legacyLocationCount" class="cleanup-button" :disabled="cleanupLoading" @click="purgeLegacyData">{{cleanupLoading?'清理中…':`清除 ${legacyLocationCount} 個舊格式案場`}}</button></div>
       </aside>
 
       <div class="map-stage">
@@ -307,7 +400,7 @@ watch(()=>`${activeId.value}:${activeRecords.value.map((record)=>record.id).join
       </div>
 
       <aside v-if="activeLocation" class="record-panel">
-        <div class="record-head"><small>案場紀錄</small><span>{{activeLocation.status}}</span></div>
+        <div class="record-head"><small>案場紀錄</small><span>{{effectiveStatus(activeLocation)}}</span></div>
         <h1>{{activeLocation.name}}</h1>
         <p class="address" v-html="linkify(activeLocation.address)"></p>
         <div class="record-summary"><span>{{activeRecords.length}} 天紀錄</span><button v-if="role!=='guest'&&!activeLocation.isDemo" @click="openCreate(true)">＋ 新增</button></div>
@@ -317,13 +410,13 @@ watch(()=>`${activeId.value}:${activeRecords.value.map((record)=>record.id).join
         </div>
 
         <article v-if="activeRecord" class="record-sheet">
-          <header class="record-title"><time>{{activeRecord.workDate || activeRecord.dateLabel || activeRecord.createdAt?.toDate?.().toLocaleString('zh-TW') || '最近更新'}}<template v-if="activeRecord.endDate"> 至 {{activeRecord.endDate}}</template></time><h2>{{activeRecord.title}}</h2><p v-html="linkify(activeRecord.notes)"></p></header>
+          <header class="record-title"><time>{{formatDate(activeRecord.workDate || activeRecord.dateLabel) || activeRecord.createdAt?.toDate?.().toLocaleString('zh-TW') || '最近更新'}}<template v-if="activeRecord.endDate"> 至 {{formatDate(activeRecord.endDate)}}</template></time><h2>{{activeRecord.title}}</h2><p v-html="linkify(activeRecord.notes)"></p><div class="record-actions"><a v-if="calendarUrl(activeRecord)" :href="calendarUrl(activeRecord)" target="_blank" rel="noopener noreferrer">加入行事曆</a><a v-if="activeRecord.mapUrl" :href="activeRecord.mapUrl" target="_blank" rel="noopener noreferrer">案場地圖</a></div></header>
           <div class="record-lines">
             <div v-if="combinedSafety(activeRecord)" class="record-line safety-line"><strong>安全與進場注意</strong><p v-html="linkify(combinedSafety(activeRecord))"></p></div>
             <div v-if="activeRecord.meetingTime||activeRecord.meetingPlace||activeRecord.mapUrl" class="record-line"><strong>集合</strong><p><b>{{activeRecord.meetingTime||'時間待確認'}}</b><template v-if="activeRecord.meetingPlace">　<span v-html="linkify(activeRecord.meetingPlace)"></span></template><br v-if="activeRecord.mapUrl"><a v-if="activeRecord.mapUrl" :href="activeRecord.mapUrl" target="_blank" rel="noopener noreferrer">開啟地圖定位</a></p></div>
             <div v-if="activeRecord.crew?.length" class="record-line"><strong>出席人員</strong><p class="crew-inline"><span v-for="member in activeRecord.crew" :key="member">{{member}}</span></p></div>
             <div v-if="activeRecord.weather" class="record-line"><strong>當日天氣</strong><p v-html="linkify(activeRecord.weather)"></p></div>
-            <div v-if="activeRecord.hospitalName" class="record-line"><strong>緊急醫療</strong><p><b>{{activeRecord.hospitalName}}</b><template v-if="activeRecord.hospitalPhone">　{{activeRecord.hospitalPhone}}</template><br><span>{{[activeRecord.hospitalDistance,activeRecord.hospitalTravelTime].filter(Boolean).join('　')}}</span></p></div>
+            <div v-if="activeRecord.hospitalName" class="record-line"><strong>緊急醫療</strong><p><b>{{activeRecord.hospitalName}}</b><template v-if="activeRecord.hospitalPhone">　{{activeRecord.hospitalPhone}}</template><br><span>{{[activeRecord.hospitalDistance,activeRecord.hospitalTravelTime].filter(Boolean).join('　')}}</span><span class="route-actions"><button type="button" :disabled="routeLoading" @click="showHospitalRoute(activeRecord)">{{routeLoading?'規劃中…':'在地圖顯示開車路線'}}</button><a :href="drivingDirectionsUrl(activeRecord)" target="_blank" rel="noopener noreferrer">開啟導航</a></span></p></div>
             <div v-if="activeRecord.workDetails" class="record-line"><strong>工作內容</strong><p v-html="linkify(activeRecord.workDetails)"></p></div>
             <div v-if="activeRecord.assignments" class="record-line"><strong>人員分組／協力</strong><p v-html="linkify(activeRecord.assignments)"></p></div>
             <div v-if="activeRecord.crane" class="record-line"><strong>吊車</strong><p v-html="linkify(activeRecord.crane)"></p></div>
@@ -345,9 +438,9 @@ watch(()=>`${activeId.value}:${activeRecords.value.map((record)=>record.id).join
       <form class="record-modal" @submit.prevent="saveRecord">
         <div class="modal-head"><div><small>{{editing?'更新紀錄':'新增案場紀錄'}}</small><h2>{{editing?'編輯工作內容':'建立工作紀錄'}}</h2></div><button type="button" @click="showCreate=false">×</button></div>
         <div class="form-scroll">
-          <section v-if="!editing&&!creatingForActive" class="form-section"><h3>案場位置</h3><label>地點名稱<input v-model="form.name" required placeholder="例如：東湖國小"></label><div class="field-action"><label>地址<input v-model="form.address" required placeholder="輸入地址後自動定位" @blur="geocodeAddress"></label><button type="button" @click="geocodeAddress">定位</button></div><div class="form-row"><label>狀態<select v-model="form.status"><option>進行中</option><option>待複查</option><option>已完成</option><option>注意事項</option></select></label><label>座標<input :value="`${form.lat.toFixed(5)}, ${form.lng.toFixed(5)}`" readonly></label></div><label>Google Maps 分享網址<input v-model="form.mapUrl" type="url" placeholder="https://maps.app.goo.gl/..."></label><label>案場固定注意事項<textarea v-model="form.attention" rows="2" placeholder="門禁、危險區域、聯絡窗口…"/></label></section>
+          <section v-if="!editing&&!creatingForActive" class="form-section"><h3>案場位置</h3><label>地點名稱<input v-model="form.name" required placeholder="例如：東湖國小"></label><div class="field-action"><label>地址<input v-model="form.address" required placeholder="輸入地址後自動定位" @input="geocodedAddress=''" @blur="geocodeAddress"></label><button type="button" @click="geocodeAddress">定位</button></div><div class="form-row"><label>狀態<select v-model="form.status"><option>進行中</option><option>待驗收</option><option>待複查</option><option>已完成</option></select></label><label>座標<input :value="`${form.lat.toFixed(5)}, ${form.lng.toFixed(5)}`" readonly></label></div><label>Google Maps 分享網址<input v-model="form.mapUrl" type="url" placeholder="https://maps.app.goo.gl/..."></label><label>案場固定注意事項<textarea v-model="form.attention" rows="2" placeholder="門禁、危險區域、聯絡窗口…"/></label></section>
 
-          <section class="form-section"><h3>日期、集合與人員</h3><div class="form-row"><label>施工日期<input v-model="form.workDate" type="date"></label><label>結束日期 <small>連續施工時填寫</small><input v-model="form.endDate" type="date"></label></div><div class="form-row"><label>集合時間<input v-model="form.meetingTime" placeholder="07:30"></label><label>集合地點<input v-model="form.meetingPlace" placeholder="校門、側門或卸裝備點"></label></div><label v-if="editing||creatingForActive">Google Maps 分享網址<input v-model="form.mapUrl" type="url" placeholder="https://maps.app.goo.gl/..."></label><fieldset class="crew-field"><legend>出席人員 <small>已整理群組中出現的 21 位縮寫</small></legend><div class="crew-grid"><label v-for="member in crewOptions" :key="member" :class="{checked:form.crew.includes(member)}"><input v-model="form.crew" type="checkbox" :value="member"><span>{{member}}</span></label></div></fieldset><label>人員分組／協力廠商<textarea v-model="form.assignments" rows="3" placeholder="例如：吊車組：丸、肯、修；外部團隊：stone 哥團隊"/></label></section>
+          <section class="form-section"><h3>日期、集合與人員</h3><div class="form-row"><label>施工起始日期<input v-model="form.workDate" type="date" :max="form.endDate||undefined"></label><label>施工結束日期 <small>可與起始日相同或較晚</small><input v-model="form.endDate" type="date" :min="form.workDate||undefined"></label></div><div class="form-row"><label>集合時間<input v-model="form.meetingTime" placeholder="07:30"></label><label>集合地點<input v-model="form.meetingPlace" placeholder="校門、側門或卸裝備點"></label></div><label v-if="editing||creatingForActive">Google Maps 分享網址<input v-model="form.mapUrl" type="url" placeholder="https://maps.app.goo.gl/..."></label><fieldset class="crew-field"><legend>出席人員 <small>已整理群組中出現的 21 位縮寫</small></legend><div class="crew-grid"><label v-for="member in crewOptions" :key="member" :class="{checked:form.crew.includes(member)}"><input v-model="form.crew" type="checkbox" :value="member"><span>{{member}}</span></label></div></fieldset><label>人員分組／協力廠商<textarea v-model="form.assignments" rows="3" placeholder="例如：吊車組：丸、肯、修；外部團隊：stone 哥團隊"/></label></section>
 
           <section class="form-section"><h3>天氣與緊急醫療</h3><div class="weather-field"><label>當日天氣預報<textarea v-model="form.weather" rows="2" placeholder="定位並選擇未來 16 天內日期，可自動取得預報"/></label><button type="button" :disabled="weatherLoading" @click="fetchWeather">{{weatherLoading?'取得中…':'依定位取得預報'}}</button></div><div class="form-row"><label>最近醫院<input v-model="form.hospitalName" placeholder="醫院名稱"></label><label>醫院電話<input v-model="form.hospitalPhone" inputmode="tel" placeholder="02-12345678"></label></div><div class="form-row"><label>距離<input v-model="form.hospitalDistance" placeholder="例如：3.2 公里"></label><label>車程<input v-model="form.hospitalTravelTime" placeholder="例如：10 分鐘"></label></div></section>
 
