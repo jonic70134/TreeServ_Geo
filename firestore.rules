@@ -244,6 +244,54 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    match /drafts/{draftId} {
+      function validDraft() {
+        let draft = request.resource.data;
+        return draft.keys().hasOnly([
+            'kind', 'title', 'data', 'createdBy', 'createdByName',
+            'updatedBy', 'updatedByName', 'updatedAt', 'saveMode',
+            'sizeBytes', 'assetCount'
+          ])
+          && draft.kind in ['work_record', 'pruning_plan']
+          && draft.title is string
+          && draft.title.size() <= 500
+          && draft.data is map
+          && draft.createdBy is string
+          && draft.createdByName is string
+          && draft.updatedBy == request.auth.uid
+          && draft.updatedByName is string
+          && draft.updatedAt == request.time
+          && draft.saveMode in ['manual', 'auto']
+          && draft.sizeBytes is int
+          && draft.sizeBytes >= 0
+          && draft.sizeBytes <= 104857600
+          && draft.assetCount is int
+          && draft.assetCount >= 0;
+      }
+
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        && validDraft()
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAdmin()
+        && validDraft()
+        && request.resource.data.createdBy == resource.data.createdBy;
+      allow delete: if isAdmin();
+
+      match /assets/{assetId} {
+        allow read: if isAdmin();
+        allow create, update: if isAdmin()
+          && request.resource.data.keys().hasOnly(['dataUrl', 'sizeBytes', 'updatedAt'])
+          && request.resource.data.dataUrl is string
+          && request.resource.data.dataUrl.size() <= 700000
+          && request.resource.data.sizeBytes is int
+          && request.resource.data.sizeBytes >= 0
+          && request.resource.data.sizeBytes <= 700000
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if isAdmin();
+      }
+    }
+
     match /users/{userId} {
       allow read: if isAdmin() || (hasAccess() && request.auth.uid == userId);
       allow create: if hasAccess() && request.auth.uid == userId && request.resource.data.role == 'user';

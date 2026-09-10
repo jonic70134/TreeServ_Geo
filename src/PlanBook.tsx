@@ -12,19 +12,35 @@ import CloudUploadRounded from '@mui/icons-material/CloudUploadRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import DeleteSweepRounded from '@mui/icons-material/DeleteSweepRounded';
 import PictureAsPdfRounded from '@mui/icons-material/PictureAsPdfRounded';
+import SaveRounded from '@mui/icons-material/SaveRounded';
 import UndoRounded from '@mui/icons-material/UndoRounded';
 import VisibilityRounded from '@mui/icons-material/VisibilityRounded';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { connectGoogleDrive, ensureProjectFolder, uploadDriveFile, type DriveItem } from './google-drive';
 import { logActivity, type User } from './firebase';
+import {
+  estimateBytes,
+  loadDraftAssets,
+  removeDraftAsset,
+  saveDraft,
+  saveDraftAsset,
+  savedTimeLabel,
+  type DraftDocument,
+} from './drafts';
 
 type Point = { x: number; y: number };
 type Tool = 'brush' | 'arc' | 'arrow' | 'circle';
 type Mark = { tool: Tool; points: Point[]; color: string; width: number; bend: number };
 type PhotoLayout = 'one' | 'two' | 'four';
-type PlanPhoto = { id: string; name: string; source: string; annotated: string; caption: string; marks: Mark[]; driveLink: string };
+type PlanPhoto = { id: string; name: string; source: string; annotated: string; caption: string; marks: Mark[]; driveLink: string; hasAsset?: boolean };
 type TreePlan = { id: string; number: string; treeName: string; conditions: string; pruningPlan: string; layout: PhotoLayout; photos: PlanPhoto[] };
+type CoverData = { areaName: string; siteName: string; title: string; description: string; surveyDate: string; evaluator: string; coverPhoto: string };
+export type PlanDraftData = {
+  cover: Omit<CoverData, 'coverPhoto'> & { hasCoverPhoto?: boolean };
+  items: Array<Omit<TreePlan, 'photos'> & { photos: Array<Pick<PlanPhoto, 'id' | 'name' | 'caption' | 'driveLink'> & { hasAsset?: boolean }> }>;
+  folderName: string;
+};
 
 const toolLabels: Record<Tool, string> = { brush: '畫筆', arc: '弧線', arrow: '箭頭', circle: '圈選' };
 const layoutLabels: Record<PhotoLayout, string> = { one: '單張照片', two: '左右兩張', four: '四宮格' };
@@ -32,7 +48,7 @@ const layoutCounts: Record<PhotoLayout, number> = { one: 1, two: 2, four: 4 };
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
 
 function emptyPhoto(): PlanPhoto {
-  return { id: crypto.randomUUID(), name: '', source: '', annotated: '', caption: '', marks: [], driveLink: '' };
+  return { id: crypto.randomUUID(), name: '', source: '', annotated: '', caption: '', marks: [], driveLink: '', hasAsset: false };
 }
 
 function emptyTreePlan(index: number): TreePlan {
@@ -46,16 +62,33 @@ function listLines(value: string) {
   return value.split(/\n+/).map((line) => line.replace(/^[●•・\-\s]+/, '').trim()).filter(Boolean);
 }
 
-export default function PlanBook({ account, onBack }: { account: User; onBack: () => void }) {
+export default function PlanBook({
+  account,
+  onBack,
+  initialDraft,
+}: {
+  account: User;
+  onBack: () => void;
+  initialDraft?: DraftDocument<PlanDraftData>;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const imageCache = useRef(new Map<string, HTMLImageElement>());
   const activeMark = useRef<Mark | undefined>(undefined);
-  const [cover, setCover] = useState({
+  const defaultCover: CoverData = {
     areaName: '', siteName: '', title: '樹木修剪計畫書', description: '', surveyDate: today,
     evaluator: '職人樹藝有限公司', coverPhoto: '',
-  });
-  const [items, setItems] = useState<TreePlan[]>([emptyTreePlan(1)]);
+  };
+  const [cover, setCover] = useState<CoverData>({ ...defaultCover, ...(initialDraft?.data.cover ?? {}), coverPhoto: '' });
+  const [coverHasAsset, setCoverHasAsset] = useState(Boolean(initialDraft?.data.cover.hasCoverPhoto));
+  const [items, setItems] = useState<TreePlan[]>(
+    initialDraft?.data.items?.length
+      ? initialDraft.data.items.map((item) => ({
+          ...item,
+          photos: item.photos.map((photo) => ({ ...photo, source: '', annotated: '', marks: [] })),
+        }))
+      : [emptyTreePlan(1)],
+  );
   const [selectedPhotoId, setSelectedPhotoId] = useState('');
   const [tool, setTool] = useState<Tool>('arc');
   const [color, setColor] = useState('#f52222');
@@ -65,12 +98,22 @@ export default function PlanBook({ account, onBack }: { account: User; onBack: (
   const [previewOpen, setPreviewOpen] = useState(false);
   const [driveToken, setDriveToken] = useState('');
   const [driveFolder, setDriveFolder] = useState<DriveItem>();
-  const [folderName, setFolderName] = useState(`TreeServ Geo 計畫書 ${today.slice(0, 7)}`);
+  const [folderName, setFolderName] = useState(initialDraft?.data.folderName || `TreeServ Geo 計畫書 ${today.slice(0, 7)}`);
   const [pdfLink, setPdfLink] = useState('');
   const [downloadUrl, setDownloadUrl] = useState('');
   const [downloadName, setDownloadName] = useState('');
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [autoSavedAt, setAutoSavedAt] = useState('');
+  const [draftId] = useState(initialDraft?.id ?? crypto.randomUUID());
+  const draftDirty = useRef(false);
+  const draftInitialized = useRef(false);
+  const lastSavedSignature = useRef('');
+  const assetDirty = useRef(new Set<string>());
+  const removedAssetIds = useRef(new Set<string>());
+  const assetBytes = useRef(new Map<string, number>());
+  const savePlanDraftRef = useRef<(mode: 'manual' | 'auto') => Promise<void>>(async () => {});
 
   const selectedPhoto = useMemo(
     () => items.flatMap((item) => item.photos).find((photo) => photo.id === selectedPhotoId),
@@ -80,6 +123,35 @@ export default function PlanBook({ account, onBack }: { account: User; onBack: (
     () => items.find((item) => item.photos.some((photo) => photo.id === selectedPhotoId)),
     [items, selectedPhotoId],
   );
+
+  const draftData = useMemo<PlanDraftData>(() => ({
+    cover: {
+      areaName: cover.areaName,
+      siteName: cover.siteName,
+      title: cover.title,
+      description: cover.description,
+      surveyDate: cover.surveyDate,
+      evaluator: cover.evaluator,
+      hasCoverPhoto: coverHasAsset,
+    },
+    items: items.map((item) => ({
+      id: item.id,
+      number: item.number,
+      treeName: item.treeName,
+      conditions: item.conditions,
+      pruningPlan: item.pruningPlan,
+      layout: item.layout,
+      photos: item.photos.map((photo) => ({
+        id: photo.id,
+        name: photo.name,
+        caption: photo.caption,
+        driveLink: photo.driveLink,
+        hasAsset: photo.hasAsset ?? Boolean(photo.source),
+      })),
+    })),
+    folderName,
+  }), [cover, coverHasAsset, items, folderName]);
+  const draftSignature = useMemo(() => JSON.stringify(draftData), [draftData]);
 
   const notify = (value: string) => {
     setMessage(value);
@@ -102,7 +174,11 @@ export default function PlanBook({ account, onBack }: { account: User; onBack: (
   function setPhotoLayout(item: TreePlan, layout: PhotoLayout) {
     const count = layoutCounts[layout];
     const photos = Array.from({ length: count }, (_entry, index) => item.photos[index] ?? emptyPhoto());
-    item.photos.slice(count).forEach((photo) => imageCache.current.delete(photo.id));
+    item.photos.slice(count).forEach((photo) => {
+      imageCache.current.delete(photo.id);
+      removedAssetIds.current.add(photo.id);
+      assetBytes.current.delete(photo.id);
+    });
     if (!photos.some((photo) => photo.id === selectedPhotoId)) setSelectedPhotoId('');
     updateItem(item.id, { layout, photos });
   }
@@ -119,10 +195,37 @@ export default function PlanBook({ account, onBack }: { account: User; onBack: (
     });
   }
 
+  async function compressDraftImage(source: string) {
+    const image = new Image();
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('草稿照片無法處理。'));
+      image.src = source;
+    });
+    let maxEdge = 1280;
+    let quality = 0.76;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const scale = Math.min(1, maxEdge / Math.max(image.naturalWidth, image.naturalHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const result = canvas.toDataURL('image/jpeg', quality);
+      if (estimateBytes(result) < 650_000) return result;
+      maxEdge *= 0.78;
+      quality -= 0.12;
+    }
+    throw new Error('照片壓縮後仍過大，請改用尺寸較小的照片。');
+  }
+
   async function addCoverPhoto(event: React.ChangeEvent<HTMLInputElement>) {
     try {
       const source = await readImage(event.target.files?.[0]);
-      if (source) setCoverField('coverPhoto', source);
+      if (source) {
+        setCoverField('coverPhoto', source);
+        setCoverHasAsset(true);
+        assetDirty.current.add('cover');
+      }
     } catch (error) { notify(error instanceof Error ? error.message : '封面照片無法讀取。'); }
     event.target.value = '';
   }
@@ -133,7 +236,8 @@ export default function PlanBook({ account, onBack }: { account: User; onBack: (
       const source = await readImage(file);
       if (source && file) {
         imageCache.current.delete(photo.id);
-        updatePhoto(photo.id, { name: file.name, source, annotated: '', marks: [], driveLink: '' });
+        updatePhoto(photo.id, { name: file.name, source, annotated: '', marks: [], driveLink: '', hasAsset: true });
+        assetDirty.current.add(photo.id);
         setSelectedPhotoId(photo.id);
       }
     } catch (error) { notify(error instanceof Error ? error.message : '照片無法讀取。'); }
@@ -194,6 +298,48 @@ export default function PlanBook({ account, onBack }: { account: User; onBack: (
     if (activeMark.current) { activeMark.current = { ...activeMark.current, width: lineWidth, bend: curveBend }; redraw(undefined, activeMark.current); }
   }, [lineWidth, curveBend]);
   useEffect(() => () => { if (downloadUrl) URL.revokeObjectURL(downloadUrl); }, [downloadUrl]);
+  useEffect(() => {
+    if (!initialDraft) return;
+    let active = true;
+    void loadDraftAssets(initialDraft.id).then((assets) => {
+      if (!active) return;
+      assets.forEach((value, key) => assetBytes.current.set(key, estimateBytes(value)));
+      const coverPhoto = assets.get('cover');
+      if (coverPhoto) { setCover((current) => ({ ...current, coverPhoto })); setCoverHasAsset(true); }
+      setItems((current) => current.map((item) => ({
+        ...item,
+        photos: item.photos.map((photo) => {
+          const source = assets.get(photo.id);
+          return source ? { ...photo, source, annotated: '', marks: [], hasAsset: true } : photo;
+        }),
+      })));
+    }).catch(() => notify('草稿文字已載入，但部分照片暫時無法下載。'));
+    return () => { active = false; };
+  }, [initialDraft?.id]);
+  useEffect(() => {
+    if (!draftInitialized.current) {
+      draftInitialized.current = true;
+      lastSavedSignature.current = draftSignature;
+      return;
+    }
+    draftDirty.current = draftSignature !== lastSavedSignature.current;
+  }, [draftSignature]);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (draftDirty.current || assetDirty.current.size || removedAssetIds.current.size) {
+        void savePlanDraftRef.current('auto');
+      }
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!draftDirty.current && !assetDirty.current.size) return;
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, []);
 
   function point(event: React.PointerEvent<HTMLCanvasElement>): Point {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -214,16 +360,70 @@ export default function PlanBook({ account, onBack }: { account: User; onBack: (
     if (!drawing || !selectedPhoto || !activeMark.current) return;
     event.currentTarget.releasePointerCapture(event.pointerId); const completed = activeMark.current; redraw(undefined, completed);
     updatePhoto(selectedPhoto.id, { annotated: event.currentTarget.toDataURL('image/png'), marks: [...selectedPhoto.marks, completed] });
+    assetDirty.current.add(selectedPhoto.id);
     activeMark.current = undefined; setDrawing(false);
   }
   function undo() {
     if (!selectedPhoto?.marks.length) return; const next = { ...selectedPhoto, marks: selectedPhoto.marks.slice(0, -1) }; redraw(next);
     updatePhoto(selectedPhoto.id, { marks: next.marks, annotated: canvasRef.current?.toDataURL('image/png') ?? '' });
+    assetDirty.current.add(selectedPhoto.id);
   }
   function clearMarks() {
     if (!selectedPhoto?.marks.length) return; const next = { ...selectedPhoto, marks: [] }; redraw(next);
     updatePhoto(selectedPhoto.id, { marks: [], annotated: canvasRef.current?.toDataURL('image/png') ?? '' });
+    assetDirty.current.add(selectedPhoto.id);
   }
+
+  async function savePlanDraft(mode: 'manual' | 'auto') {
+    if (draftSaving) return;
+    if (mode === 'auto' && !draftDirty.current && !assetDirty.current.size && !removedAssetIds.current.size) return;
+    setDraftSaving(true);
+    try {
+      const sources = new Map<string, string>();
+      if (cover.coverPhoto) sources.set('cover', cover.coverPhoto);
+      items.forEach((item) => item.photos.forEach((photo) => {
+        if (photo.source) sources.set(photo.id, photo.annotated || photo.source);
+      }));
+      const dirtyAssets = [...assetDirty.current];
+      for (const assetId of dirtyAssets) {
+        const source = sources.get(assetId);
+        if (!source) continue;
+        const compressed = await compressDraftImage(source);
+        await saveDraftAsset(draftId, assetId, compressed);
+        assetBytes.current.set(assetId, estimateBytes(compressed));
+      }
+      const removed = [...removedAssetIds.current];
+      for (const assetId of removed) {
+        await removeDraftAsset(draftId, assetId);
+        assetBytes.current.delete(assetId);
+      }
+      await saveDraft({
+        id: draftId,
+        kind: 'pruning_plan',
+        title: [cover.areaName, cover.siteName, cover.title].filter(Boolean).join(' ') || '未命名修剪計畫書',
+        data: draftData,
+        account,
+        mode,
+        createdBy: initialDraft?.createdBy,
+        createdByName: initialDraft?.createdByName,
+        assetCount: (draftData.cover.hasCoverPhoto ? 1 : 0) + draftData.items.flatMap((item) => item.photos).filter((photo) => photo.hasAsset).length,
+        assetBytes: [...assetBytes.current.values()].reduce((sum, bytes) => sum + bytes, 0),
+      });
+      dirtyAssets.forEach((assetId) => assetDirty.current.delete(assetId));
+      removed.forEach((assetId) => removedAssetIds.current.delete(assetId));
+      lastSavedSignature.current = draftSignature;
+      draftDirty.current = false;
+      const time = savedTimeLabel();
+      if (mode === 'auto') setAutoSavedAt(`${time} 已自動存入草稿`);
+      else notify(`${time} 已儲存草稿。`);
+    } catch (error) {
+      if (mode === 'manual') notify(error instanceof Error ? error.message : '草稿儲存失敗。');
+      else setAutoSavedAt('自動儲存失敗，請按「儲存草稿」重試');
+    } finally {
+      setDraftSaving(false);
+    }
+  }
+  savePlanDraftRef.current = savePlanDraft;
 
   async function ensureConnection() {
     let token = driveToken, folder = driveFolder;
@@ -329,9 +529,10 @@ export default function PlanBook({ account, onBack }: { account: User; onBack: (
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ alignItems: { md: 'center' }, justifyContent: 'space-between' }}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <Button startIcon={<ArrowBackRounded />} onClick={onBack}>返回案場地圖</Button><Divider flexItem orientation="vertical" />
-          <Box><Typography variant="caption" color="primary">TreeServ Geo</Typography><Typography variant="h5">製作樹木修剪計畫書</Typography></Box>
+          <Box><Typography variant="caption" color="primary">TreeServ Geo</Typography><Typography variant="h5">製作樹木修剪計畫書</Typography>{autoSavedAt && <Typography variant="caption" color={autoSavedAt.includes('失敗') ? 'error' : 'text.secondary'}>{autoSavedAt}</Typography>}</Box>
         </Stack>
         <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+          <Button variant="outlined" startIcon={<SaveRounded />} disabled={draftSaving} onClick={() => void savePlanDraft('manual')}>{draftSaving ? '儲存中…' : '儲存草稿'}</Button>
           <Button variant="outlined" startIcon={<CloudUploadRounded />} disabled={Boolean(busy)} onClick={connectDrive}>{driveFolder ? 'Drive 已連接' : '連接 Drive'}</Button>
           <Button variant="contained" startIcon={<VisibilityRounded />} onClick={() => setPreviewOpen(true)}>預覽計畫書</Button>
         </Stack>
@@ -352,7 +553,7 @@ export default function PlanBook({ account, onBack }: { account: User; onBack: (
           <TextField required label="評估單位" value={cover.evaluator} onChange={(event) => setCoverField('evaluator', event.target.value)} />
           <Box className="plan-cover-upload">
             <Button component="label" variant="outlined" startIcon={<AddPhotoAlternateRounded />}>{cover.coverPhoto ? '更換封面照片' : '加入封面照片（選填）'}<input hidden type="file" accept="image/*" onChange={addCoverPhoto} /></Button>
-            {cover.coverPhoto && <Button color="error" onClick={() => setCoverField('coverPhoto', '')}>移除</Button>}
+            {cover.coverPhoto && <Button color="error" onClick={() => { setCoverField('coverPhoto', ''); setCoverHasAsset(false); removedAssetIds.current.add('cover'); assetBytes.current.delete('cover'); }}>移除</Button>}
           </Box>
         </Box>
       </Paper>
@@ -360,7 +561,7 @@ export default function PlanBook({ account, onBack }: { account: User; onBack: (
       {items.map((item, itemIndex) => <Paper variant="outlined" className="plan-form-section" key={item.id}>
         <Box className="plan-section-heading">
           <div><Typography variant="overline">樹木項目 {itemIndex + 1}</Typography><Typography variant="h6">{item.treeName || '尚未填寫樹木名稱'}</Typography></div>
-          {items.length > 1 && <IconButton color="error" aria-label={`刪除樹木項目 ${itemIndex + 1}`} onClick={() => { item.photos.forEach((photo) => imageCache.current.delete(photo.id)); setItems((current) => current.filter((entry) => entry.id !== item.id)); }}><DeleteOutlineRounded /></IconButton>}
+          {items.length > 1 && <IconButton color="error" aria-label={`刪除樹木項目 ${itemIndex + 1}`} onClick={() => { item.photos.forEach((photo) => { imageCache.current.delete(photo.id); removedAssetIds.current.add(photo.id); assetBytes.current.delete(photo.id); }); setItems((current) => current.filter((entry) => entry.id !== item.id)); }}><DeleteOutlineRounded /></IconButton>}
         </Box>
         <Box className="plan-item-fields">
           <TextField label="編號" value={item.number} onChange={(event) => updateItem(item.id, { number: event.target.value })} />
@@ -379,7 +580,7 @@ export default function PlanBook({ account, onBack }: { account: User; onBack: (
             <TextField size="small" label="圖號／照片說明（選填）" placeholder={`例如：圖${photoIndex + 1}`} value={photo.caption} onChange={(event) => updatePhoto(photo.id, { caption: event.target.value })} />
             {photo.source && <Stack direction="row" spacing={1}>
               <Button component="label" size="small" variant="outlined" sx={{ flex: 1 }}>更換<input hidden type="file" accept="image/*" onChange={(event) => addPhoto(photo, event)} /></Button>
-              <Button size="small" color="error" onClick={() => { imageCache.current.delete(photo.id); updatePhoto(photo.id, { name: '', source: '', annotated: '', marks: [], driveLink: '' }); if (selectedPhotoId === photo.id) setSelectedPhotoId(''); }}>清除</Button>
+              <Button size="small" color="error" onClick={() => { imageCache.current.delete(photo.id); removedAssetIds.current.add(photo.id); assetDirty.current.delete(photo.id); assetBytes.current.delete(photo.id); updatePhoto(photo.id, { name: '', source: '', annotated: '', marks: [], driveLink: '', hasAsset: false }); if (selectedPhotoId === photo.id) setSelectedPhotoId(''); }}>清除</Button>
             </Stack>}
           </Paper>)}
         </Box>

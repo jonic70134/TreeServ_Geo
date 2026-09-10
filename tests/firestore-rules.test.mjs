@@ -183,6 +183,24 @@ test('owner and admin can append plan image and PDF export activity', async () =
   await assertFails(setDoc(doc(collection(member, 'activityLogs')), entry('member', 'plan_pdf_save', '', 'Community pruning plan')));
 });
 
+test('drafts and draft assets are restricted to owner and administrators', async () => {
+  const draft = (uid, title) => ({
+    kind: 'work_record', title, data: { title }, createdBy: uid, createdByName: uid,
+    updatedBy: uid, updatedByName: uid, updatedAt: serverTimestamp(), saveMode: 'manual',
+    sizeBytes: 128, assetCount: 0,
+  });
+  await assertSucceeds(setDoc(doc(owner, 'drafts', 'owner-draft'), draft('owner', 'Owner draft')));
+  await assertSucceeds(setDoc(doc(admin, 'drafts', 'admin-draft'), draft('admin', 'Admin draft')));
+  await assertFails(setDoc(doc(member, 'drafts', 'member-draft'), draft('member', 'Member draft')));
+  await assertSucceeds(getDocs(collection(owner, 'drafts')));
+  await assertSucceeds(getDocs(collection(admin, 'drafts')));
+  await assertFails(getDocs(collection(member, 'drafts')));
+  await assertSucceeds(setDoc(doc(owner, 'drafts', 'owner-draft', 'assets', 'cover'), {
+    dataUrl: 'data:image/jpeg;base64,abc', sizeBytes: 26, updatedAt: serverTimestamp(),
+  }));
+  await assertFails(getDoc(doc(member, 'drafts', 'owner-draft', 'assets', 'cover')));
+});
+
 test('owner and admin deletion require an atomic receipt and activity record', async () => {
   await assertFails(deleteDoc(doc(member, 'workRecords', 'delete-me')));
   await assertFails(deleteDoc(doc(owner, 'workRecords', 'delete-me')));

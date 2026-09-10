@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   AppBar,
@@ -44,6 +44,8 @@ import DeleteRounded from '@mui/icons-material/DeleteRounded';
 import RouteRounded from '@mui/icons-material/RouteRounded';
 import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded';
 import EventRounded from '@mui/icons-material/EventRounded';
+import EditNoteRounded from '@mui/icons-material/EditNoteRounded';
+import SaveRounded from '@mui/icons-material/SaveRounded';
 import {
   AccessDeniedError,
   auditData,
@@ -73,9 +75,16 @@ import RouteMap from './RouteMap';
 import HospitalRoute from './HospitalRoute';
 import ActivityLog from './ActivityLog';
 import AccessManagement from './AccessManagement';
-import PlanBook from './PlanBook';
+import PlanBook, { type PlanDraftData } from './PlanBook';
+import DraftList from './DraftList';
+import {
+  deleteDraftWithAssets,
+  saveDraft,
+  savedTimeLabel,
+  type DraftDocument,
+} from './drafts';
 
-type View = 'map' | 'access' | 'logs' | 'plan';
+type View = 'map' | 'access' | 'logs' | 'plan' | 'drafts';
 type RecordForm = {
   siteName: string;
   address: string;
@@ -107,6 +116,14 @@ type RecordForm = {
   fileUrls: string;
   lat: number;
   lng: number;
+};
+type WorkRecordDraftData = {
+  form: RecordForm;
+  routePoints: RoutePoint[];
+  routeNotes: string;
+  newSite: boolean;
+  editingId?: string;
+  editingLocationId?: string;
 };
 
 const demos = demoLocations as SiteLocation[];
@@ -298,6 +315,16 @@ export default function TreeServApp() {
   const [routeNotes, setRouteNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState('');
+  const [planDraft, setPlanDraft] = useState<DraftDocument<PlanDraftData>>();
+  const [recordDraftId, setRecordDraftId] = useState('');
+  const [recordDraftOwner, setRecordDraftOwner] = useState<{ uid?: string; name?: string }>({});
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [autoSavedAt, setAutoSavedAt] = useState('');
+  const recordDraftDirty = useRef(false);
+  const recordDraftInitialized = useRef(false);
+  const lastRecordDraftSignature = useRef('');
+  const recordDraftPayloadRef = useRef<WorkRecordDraftData>();
+  const saveRecordDraftRef = useRef<(mode: 'manual' | 'auto') => Promise<void>>(async () => {});
   const [confirm, setConfirm] = useState<{
     title: string;
     body: string;
@@ -489,12 +516,76 @@ export default function TreeServApp() {
     }
   }
   const canManage = role === 'owner' || role === 'admin';
+  const recordDraftPayload = useMemo<WorkRecordDraftData>(() => ({
+    form,
+    routePoints,
+    routeNotes,
+    newSite,
+    ...(editing?.id ? { editingId: editing.id, editingLocationId: editing.locationId } : {}),
+  }), [form, routePoints, routeNotes, newSite, editing?.id, editing?.locationId]);
+  const recordDraftSignature = useMemo(() => JSON.stringify(recordDraftPayload), [recordDraftPayload]);
+  recordDraftPayloadRef.current = recordDraftPayload;
+
+  useEffect(() => {
+    if (!recordOpen || !canManage) return;
+    if (!recordDraftInitialized.current) {
+      recordDraftInitialized.current = true;
+      lastRecordDraftSignature.current = recordDraftSignature;
+      return;
+    }
+    recordDraftDirty.current = recordDraftSignature !== lastRecordDraftSignature.current;
+  }, [recordDraftSignature, recordOpen, canManage]);
+  useEffect(() => {
+    if (!recordOpen || !canManage) return;
+    const timer = window.setInterval(() => {
+      if (recordDraftDirty.current) void saveRecordDraftRef.current('auto');
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [recordOpen, canManage]);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!recordOpen || !canManage || !recordDraftDirty.current) return;
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [recordOpen, canManage]);
   const isImported = (record: WorkRecord) =>
     demos.some((location) =>
       location.records?.some((item) => item.id === record.id),
     );
   const canEdit = (record: WorkRecord) =>
     role === 'owner' || role === 'admin' || record.authorId === account?.uid;
+
+  async function saveRecordDraft(mode: 'manual' | 'auto') {
+    if (!canManage || !account || !recordOpen || draftSaving || !recordDraftId) return;
+    if (mode === 'auto' && !recordDraftDirty.current) return;
+    setDraftSaving(true);
+    try {
+      const data = recordDraftPayloadRef.current ?? recordDraftPayload;
+      await saveDraft({
+        id: recordDraftId,
+        kind: 'work_record',
+        title: form.title || form.siteName || '未命名案場工作紀錄',
+        data,
+        account,
+        mode,
+        createdBy: recordDraftOwner.uid,
+        createdByName: recordDraftOwner.name,
+      });
+      lastRecordDraftSignature.current = JSON.stringify(data);
+      recordDraftDirty.current = false;
+      const time = savedTimeLabel();
+      if (mode === 'auto') setAutoSavedAt(`${time} 已自動存入草稿`);
+      else notify(`${time} 已儲存草稿。`);
+    } catch {
+      if (mode === 'auto') setAutoSavedAt('自動儲存失敗，請按「儲存草稿」重試');
+      else notify('草稿儲存失敗，請稍後再試。');
+    } finally {
+      setDraftSaving(false);
+    }
+  }
+  saveRecordDraftRef.current = saveRecordDraft;
 
   function openCreate(forCurrentSite: boolean) {
     const current = activeLocation;
@@ -509,6 +600,11 @@ export default function TreeServApp() {
     });
     setRoutePoints([]);
     setRouteNotes('');
+    setRecordDraftId(crypto.randomUUID());
+    setRecordDraftOwner({});
+    setAutoSavedAt('');
+    recordDraftInitialized.current = false;
+    recordDraftDirty.current = false;
     setRecordOpen(true);
   }
   async function openEdit(record: WorkRecord) {
@@ -530,11 +626,32 @@ export default function TreeServApp() {
     });
     setRoutePoints((record.routePoints ?? []).map((point) => ({ ...point })));
     setRouteNotes(record.routeNotes ?? '');
+    setRecordDraftId(crypto.randomUUID());
+    setRecordDraftOwner({});
+    setAutoSavedAt('');
+    recordDraftInitialized.current = false;
+    recordDraftDirty.current = false;
     setRecordOpen(true);
     if (account)
       await logActivity(account, 'edit', record.id, record.title).catch(() =>
         notify('操作紀錄寫入失敗。'),
       );
+  }
+
+  function openWorkDraft(draft: DraftDocument<WorkRecordDraftData>) {
+    const data = draft.data;
+    const sourceRecord = data.editingId ? records.find((record) => record.id === data.editingId) : undefined;
+    setEditing(sourceRecord);
+    setNewSite(Boolean(data.newSite));
+    setForm({ ...emptyForm, ...data.form, crew: [...(data.form.crew ?? [])] });
+    setRoutePoints((data.routePoints ?? []).map((point) => ({ ...point })));
+    setRouteNotes(data.routeNotes ?? '');
+    setRecordDraftId(draft.id);
+    setRecordDraftOwner({ uid: draft.createdBy, name: draft.createdByName });
+    setAutoSavedAt('');
+    recordDraftInitialized.current = false;
+    recordDraftDirty.current = false;
+    setRecordOpen(true);
   }
   const setField =
     (key: keyof RecordForm) =>
@@ -645,7 +762,10 @@ export default function TreeServApp() {
         ),
       );
       await batch.commit();
+      if (canManage && recordDraftId) await deleteDraftWithAssets(recordDraftId).catch(() => undefined);
       setRecordOpen(false);
+      setRecordDraftId('');
+      recordDraftDirty.current = false;
       notify(editing ? '工作紀錄已更新。' : '工作紀錄已建立。');
     } catch (error) {
       notify(
@@ -811,8 +931,8 @@ export default function TreeServApp() {
         </Paper>
       </Box>
     );
-  if (view === 'plan')
-    return <PlanBook account={account} onBack={() => setView('map')} />;
+  if (view === 'plan' && canManage)
+    return <PlanBook account={account} initialDraft={planDraft} onBack={() => { setPlanDraft(undefined); setView('map'); }} />;
 
   const labels: Array<[keyof RecordForm, string, boolean?]> = [
     ['title', '紀錄標題'],
@@ -895,13 +1015,13 @@ export default function TreeServApp() {
           >
             建立工作紀錄
           </Button>
-          {role === 'owner' && (
+          {canManage && (
             <Button
               sx={{ display: { xs: 'none', lg: 'inline-flex' } }}
               color="secondary"
               variant="contained"
               startIcon={<DescriptionRounded />}
-              onClick={() => setView('plan')}
+              onClick={() => { setPlanDraft(undefined); setView('plan'); }}
             >
               製作計畫書
             </Button>
@@ -970,6 +1090,17 @@ export default function TreeServApp() {
         {canManage && (
           <MenuItem
             onClick={() => {
+              setView('drafts');
+              setMenuAnchor(undefined);
+            }}
+          >
+            <EditNoteRounded sx={{ mr: 1.5 }} />
+            草稿列表
+          </MenuItem>
+        )}
+        {canManage && (
+          <MenuItem
+            onClick={() => {
               setView('access');
               setMenuAnchor(undefined);
             }}
@@ -989,9 +1120,10 @@ export default function TreeServApp() {
             操作紀錄
           </MenuItem>
         )}
-        {role === 'owner' && (
+        {canManage && (
           <MenuItem
             onClick={() => {
+              setPlanDraft(undefined);
               setView('plan');
               setMenuAnchor(undefined);
             }}
@@ -1007,7 +1139,20 @@ export default function TreeServApp() {
         </MenuItem>
       </Menu>
 
-      {view === 'access' && canManage ? (
+      {view === 'drafts' && canManage ? (
+        <DraftList
+          notify={notify}
+          onOpen={(draft) => {
+            if (draft.kind === 'pruning_plan') {
+              setPlanDraft(draft as DraftDocument<PlanDraftData>);
+              setView('plan');
+            } else {
+              setView('map');
+              openWorkDraft(draft as DraftDocument<WorkRecordDraftData>);
+            }
+          }}
+        />
+      ) : view === 'access' && canManage ? (
         <AccessManagement account={account} role={role} notify={notify} />
       ) : view === 'logs' && canManage ? (
         <ActivityLog />
@@ -1351,7 +1496,12 @@ export default function TreeServApp() {
         maxWidth="md"
         scroll="paper"
       >
-        <DialogTitle>{editing ? '編輯工作紀錄' : '建立工作紀錄'}</DialogTitle>
+        <DialogTitle>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' } }}>
+            <span>{editing ? '編輯工作紀錄' : '建立工作紀錄'}</span>
+            {canManage && autoSavedAt && <Typography variant="caption" color={autoSavedAt.includes('失敗') ? 'error' : 'text.secondary'}>{autoSavedAt}</Typography>}
+          </Stack>
+        </DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2.2} sx={{ pt: 0.5 }}>
             {newSite && (
@@ -1470,6 +1620,11 @@ export default function TreeServApp() {
           <Button disabled={saving} onClick={() => setRecordOpen(false)}>
             取消
           </Button>
+          {canManage && (
+            <Button disabled={saving || draftSaving} startIcon={<SaveRounded />} variant="outlined" onClick={() => void saveRecordDraft('manual')}>
+              {draftSaving ? '儲存中…' : '儲存草稿'}
+            </Button>
+          )}
           <Button disabled={saving} variant="contained" onClick={requestSave}>
             {saving ? '儲存中…' : editing ? '更新紀錄' : '建立紀錄'}
           </Button>
