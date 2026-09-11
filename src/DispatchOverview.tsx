@@ -5,7 +5,7 @@ import { Alert, Box, Button, Chip, Paper, Stack, TextField, Typography } from '@
 import MapRounded from '@mui/icons-material/MapRounded';
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded';
 import type { Personnel, SiteLocation, WorkRecord } from './types';
-import { recordDayRange, recordPersonnel, recordsOverlap } from './scheduling';
+import { localIsoDate, recordDayRange, recordPersonnel, recordsOverlap } from './scheduling';
 
 type Props = {
   records: WorkRecord[];
@@ -15,10 +15,6 @@ type Props = {
 };
 type Mode = 'day' | 'week' | 'month';
 
-const isoDate = (date: Date) => {
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
-};
 const addDays = (value: Date, days: number) => {
   const next = new Date(value);
   next.setDate(next.getDate() + days);
@@ -28,8 +24,9 @@ const startOfWeek = (date: Date) => addDays(date, -((date.getDay() + 6) % 7));
 const dayNumber = (date: Date) => Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86_400_000);
 
 export default function DispatchOverview({ records, locations, personnel, onOpen }: Props) {
+  const today = localIsoDate();
   const [mode, setMode] = useState<Mode>('week');
-  const [focusDate, setFocusDate] = useState(isoDate(new Date()));
+  const [focusDate, setFocusDate] = useState(today);
   const days = useMemo(() => {
     const focus = new Date(`${focusDate}T12:00:00`);
     if (mode === 'day') return [focus];
@@ -71,12 +68,16 @@ export default function DispatchOverview({ records, locations, personnel, onOpen
           <Box sx={{ overflowX: 'auto' }}>
             <Box sx={{ minWidth: 980, display: 'grid', gridTemplateColumns: '180px repeat(7, minmax(110px, 1fr))', borderTop: 1, borderLeft: 1, borderColor: 'divider' }}>
               <Box sx={{ p: 1.5, borderRight: 1, borderBottom: 1, borderColor: 'divider', fontWeight: 750 }}>工作人員</Box>
-              {days.map((date) => <Box key={isoDate(date)} sx={{ p: 1.5, borderRight: 1, borderBottom: 1, borderColor: 'divider', fontWeight: 750 }}>{date.toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' })}</Box>)}
+              {days.map((date) => {
+                const isPast = localIsoDate(date) < today;
+                return <Box key={localIsoDate(date)} sx={{ p: 1.5, borderRight: 1, borderBottom: 1, borderColor: 'divider', fontWeight: 750, bgcolor: isPast ? 'action.disabledBackground' : undefined }}>{date.toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' })}{isPast && <Typography variant="caption" sx={{ display: 'block' }} color="text.secondary">已過日期</Typography>}</Box>;
+              })}
               {visiblePersonnel.map((person) => <Box key={person.id} sx={{ display: 'contents' }}>
                 <Box sx={{ p: 1.5, borderRight: 1, borderBottom: 1, borderColor: 'divider', bgcolor: person.status === 'archived' ? 'action.disabledBackground' : undefined }}><Typography sx={{ fontWeight: 700 }}>{person.name} {person.code}</Typography>{conflictedPersonnel.has(person.id) && <Chip size="small" color="warning" label="重複派工" />}</Box>
                 {days.map((date) => {
+                  const isPast = localIsoDate(date) < today;
                   const assigned = recordsOnDay(date).filter((record) => recordPersonnel(record).some((item) => item.personnelId === person.id));
-                  return <Box key={isoDate(date)} sx={{ p: 1, minHeight: 74, borderRight: 1, borderBottom: 1, borderColor: 'divider' }}>{assigned.map((record) => <Button key={record.id} size="small" fullWidth sx={{ mb: 0.5, justifyContent: 'flex-start', textAlign: 'left' }} onClick={() => onOpen(record)}>{locationName(record)} · {record.scheduleSlot ?? '全天'}</Button>)}</Box>;
+                  return <Box key={localIsoDate(date)} sx={{ p: 1, minHeight: 74, borderRight: 1, borderBottom: 1, borderColor: 'divider', bgcolor: isPast ? 'action.disabledBackground' : undefined }}>{assigned.map((record) => <Button key={record.id} size="small" fullWidth sx={{ mb: 0.5, justifyContent: 'flex-start', textAlign: 'left' }} onClick={() => onOpen(record)}>{locationName(record)} · {record.scheduleSlot ?? '全天'}</Button>)}</Box>;
                 })}
               </Box>)}
             </Box>
@@ -84,10 +85,11 @@ export default function DispatchOverview({ records, locations, personnel, onOpen
         ) : (
           <Box sx={{ display: 'grid', gridTemplateColumns: mode === 'month' ? { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' } : '1fr', gap: 1.5 }}>
             {days.map((date) => {
+              const isPast = localIsoDate(date) < today;
               const dayRecords = recordsOnDay(date);
-              return <Paper key={isoDate(date)} variant="outlined" sx={{ p: 2, minHeight: 130 }}>
+              return <Paper key={localIsoDate(date)} variant="outlined" sx={{ p: 2, minHeight: 130, bgcolor: isPast ? 'action.disabledBackground' : undefined }}>
                 <Typography sx={{ fontWeight: 800, mb: 1 }}>{date.toLocaleDateString('zh-TW', { month: 'long', day: 'numeric', weekday: 'short' })}</Typography>
-                {!dayRecords.length && <Typography color="text.secondary">目前有空檔</Typography>}
+                {!dayRecords.length && <Typography color="text.secondary">{isPast ? '已過日期' : '尚無排定工作'}</Typography>}
                 {dayRecords.map((record) => <Paper key={record.id} variant="outlined" sx={{ p: 1.25, mb: 1, bgcolor: 'action.hover' }}>
                   <Typography sx={{ fontWeight: 750 }}>{locationName(record)}</Typography>
                   <Typography variant="body2">{record.scheduleSlot ?? '全天'} · {recordPersonnel(record).map((item) => item.nameSnapshot).join('、') || '尚未派工'}</Typography>

@@ -7,6 +7,15 @@ const dayNumber = (value?: string) => {
     : undefined;
 };
 
+export function localIsoDate(date = new Date()) {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+}
+
+export function isPastDate(value?: string, today = localIsoDate()) {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value) && value < today);
+}
+
 export function recordDayRange(record: Pick<WorkRecord, 'workDate' | 'endDate' | 'estimatedDays'>) {
   const start = dayNumber(record.workDate);
   if (start === undefined) return undefined;
