@@ -38,5 +38,7 @@ next-env.d.ts
 /work/
 *.tsbuildinfo
 
-# Project documentation must remain versionable even when a global *.md rule exists.
+# Project documentation and Codex guidance must remain versionable even when a global *.md rule exists.
 !/docs/system-architecture.md
+!/AGENTS.md
+!/.agents/skills/treeserv-architecture/SKILL.md
