@@ -33,6 +33,8 @@ button, input, textarea, select { font: inherit; }
 .site-map { position: absolute; inset: 0; z-index: 1; }
 .map-provider-chip { position: absolute !important; left: 16px; bottom: 16px; z-index: 500; }
 .route-map { width: 100%; height: 340px; border-radius: 10px; overflow: hidden; z-index: 0; }
+.hospital-route-map { width: 100%; height: 300px; border: 1px solid #c9d4ca; border-radius: 10px; overflow: hidden; z-index: 0; }
+.mobile-site-select { display: none; }
 
 .leaflet-tree-marker {
   display: grid;
@@ -147,12 +149,15 @@ button, input, textarea, select { font: inherit; }
 }
 @media (max-width: 700px) {
   .mui-workspace { height: auto; min-height: calc(100vh - 112px); grid-template-columns: 1fr; grid-template-rows: auto auto 52vh; grid-template-areas: "places" "records" "map"; }
-  .mui-place-list { max-height: 250px; border-width: 0 0 1px !important; }
+  .mui-place-list { max-height: none; border-width: 0 0 1px !important; }
+  .mobile-site-select { display: block; }
+  .desktop-site-list { display: none; }
   .mui-record-panel { padding: 16px; border-width: 0 0 1px !important; }
   .mui-map-panel { min-height: 52vh; }
   .mui-image-grid { grid-template-columns: 1fr; }
   .mui-image-grid img { height: 220px; }
   .route-map { height: 300px; }
+  .hospital-route-map { height: 270px; }
   .canvas-frame { min-height: 300px; max-height: 52vh; }
   .canvas-frame canvas { max-height: 52vh; }
   .plan-studio-header { padding: 10px 12px; }

@@ -47,6 +47,9 @@ export type SiteLocation = {
   aliases: string[];
   records?: WorkRecord[];
   isDemo?: boolean;
+  recordCount?: number;
+  latestRecordAt?: unknown;
+  latestRecordTitle?: string;
   updatedAt?: any;
   createdBy?: string;
 };

@@ -68,3 +68,7 @@ npm run dev
 ```
 
 未提供 Firebase 或 Google Maps 設定時，網站會以內建示範資料和預覽地圖運作，方便先驗收操作流程。
+
+## Google Sheets 開發紀錄 MCP
+
+專案包含一個本機 MCP，可將開發更新、功能／系統結構／技術棧，以及 Bug 修復寫入固定的 Google 試算表。它只管理三張 TreeServ Geo 專用工作表，不會變更既有工作表。服務帳戶、試算表分享方式與 Codex 連線步驟請見 [`mcp/google-sheets-devlog/README.md`](mcp/google-sheets-devlog/README.md)。

@@ -36,3 +36,7 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+*.tsbuildinfo
+
+# Project documentation must remain versionable even when a global *.md rule exists.
+!/docs/system-architecture.md

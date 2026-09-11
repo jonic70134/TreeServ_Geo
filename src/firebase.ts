@@ -1,13 +1,25 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User } from 'firebase/auth';
+import {
+  browserLocalPersistence,
+  browserPopupRedirectResolver,
+  browserSessionPersistence,
+  getAuth,
+  GoogleAuthProvider,
+  indexedDBLocalPersistence,
+  initializeAuth,
+  signInWithPopup,
+  signOut,
+  onAuthStateChanged,
+  type User,
+} from 'firebase/auth';
 import {
   addDoc, collection, deleteDoc, doc, getDoc, getFirestore, onSnapshot, orderBy, query,
-  serverTimestamp, setDoc, updateDoc, writeBatch, limit, getDocs, startAfter,
+  serverTimestamp, setDoc, updateDoc, writeBatch, limit, getDocs, startAfter, where,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { getRuntimeConfig } from './runtime-config';
 
-const config = getRuntimeConfig()?.firebase ?? {
+const configuredFirebase = getRuntimeConfig()?.firebase ?? {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
@@ -16,11 +28,40 @@ const config = getRuntimeConfig()?.firebase ?? {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
+// Firebase's popup helper normally lives on firebaseapp.com. Browsers that
+// partition third-party storage can then lose the popup's initial state while
+// switching Google accounts. Hosted builds proxy /__/auth/* on the current
+// origin, so point Auth at that same origin and keep the Firebase domain for
+// local development where the proxy is not available.
+const usesHostedAuthProxy =
+  typeof window !== 'undefined' &&
+  window.location.protocol === 'https:' &&
+  !['localhost', '127.0.0.1'].includes(window.location.hostname);
+
+const config = {
+  ...configuredFirebase,
+  authDomain: usesHostedAuthProxy ? window.location.host : configuredFirebase.authDomain,
+};
+
 export const firebaseReady = Boolean(config.apiKey && config.projectId && config.authDomain);
 const app = firebaseReady ? (getApps()[0] ?? initializeApp(config)) : null;
-export const auth = app ? getAuth(app) : null;
+export const auth = app
+  ? (() => {
+      try {
+        return initializeAuth(app, {
+          persistence: [indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence],
+          popupRedirectResolver: browserPopupRedirectResolver,
+        });
+      } catch {
+        // Development hot reload can reuse an Auth instance that is already initialized.
+        return getAuth(app);
+      }
+    })()
+  : null;
 export const db = app ? getFirestore(app) : null;
 export const ownerEmail = 'jonic70134@gmail.com';
+
+let googleSignInInFlight: ReturnType<typeof signInWithPopup> | null = null;
 
 export type AccessRole = 'owner' | 'admin' | 'user';
 export type MemberProfile = {
@@ -44,9 +85,27 @@ export const isOwnerAccount = (user: User | null) =>
 
 export async function googleSignIn() {
   if (!auth) throw new Error('Firebase 尚未設定');
+  if (googleSignInInFlight) return googleSignInInFlight;
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
-  return signInWithPopup(auth, provider);
+  googleSignInInFlight = signInWithPopup(auth, provider);
+  try {
+    return await googleSignInInFlight;
+  } finally {
+    googleSignInInFlight = null;
+  }
+}
+
+export function authErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
+  if (code === 'auth/popup-closed-by-user') return '登入視窗已關閉，尚未完成登入。';
+  if (code === 'auth/popup-blocked') return '瀏覽器封鎖了登入視窗，請允許此網站開啟彈出式視窗後再試。';
+  if (code === 'auth/cancelled-popup-request') return '已有登入視窗正在處理，請在該視窗完成登入。';
+  if (message.toLowerCase().includes('missing initial state')) {
+    return 'Google 登入工作階段已失效。請關閉舊的登入視窗、重新整理本頁，再按一次登入。';
+  }
+  return message || 'Google 登入失敗。';
 }
 
 export async function authorizeAccount(account: User): Promise<AccessRole> {
@@ -113,6 +172,6 @@ export async function logActivity(account: User, action: AuditAction, recordId =
 
 export {
   signOut, onAuthStateChanged, addDoc, collection, deleteDoc, doc, getDoc, onSnapshot,
-  orderBy, query, serverTimestamp, setDoc, updateDoc, writeBatch, limit, getDocs, startAfter,
+  orderBy, query, serverTimestamp, setDoc, updateDoc, writeBatch, limit, getDocs, startAfter, where,
 };
 export type { QueryDocumentSnapshot, User };

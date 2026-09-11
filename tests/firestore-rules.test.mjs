@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, writeBatch, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, getDocs, limit, query, updateDoc, deleteDoc, writeBatch, serverTimestamp, Timestamp } from 'firebase/firestore';
 
 let env;
 let owner, admin, member, other, disabled, invitee, guest;
@@ -70,7 +70,7 @@ before(async () => {
       invitedAt: Timestamp.fromMillis(3),
       updatedAt: Timestamp.fromMillis(3),
     });
-    for (const id of ['existing', 'delete-me', 'immutable', 'no-log']) {
+    for (const id of ['existing', 'delete-me', 'delete-by-admin', 'immutable', 'no-log']) {
       await setDoc(doc(store, 'workRecords', id), {
         authorId: 'member', authorName: 'Original author', locationId: 'site',
         title: 'Test record', createdAt: Timestamp.fromMillis(0), notes: 'Original',
@@ -98,6 +98,13 @@ test('anonymous, uninvited, and disabled accounts cannot read project data', asy
   await assertFails(getDoc(doc(disabled, 'workRecords', 'existing')));
 });
 
+test('collection reads must declare a limit of at most 100 documents', async () => {
+  await assertFails(getDocs(collection(owner, 'workRecords')));
+  await assertFails(getDocs(query(collection(owner, 'workRecords'), limit(101))));
+  await assertSucceeds(getDocs(query(collection(owner, 'workRecords'), limit(100))));
+  await assertSucceeds(getDoc(doc(owner, 'workRecords', 'existing')));
+});
+
 test('pending invite can only be accepted by the matching verified Google account', async () => {
   await assertFails(getDoc(doc(invitee, 'workRecords', 'existing')));
   const batch = writeBatch(invitee);
@@ -115,7 +122,7 @@ test('pending invite can only be accepted by the matching verified Google accoun
   await assertSucceeds(getDoc(doc(invitee, 'workRecords', 'existing')));
 });
 
-test('owner and admin can invite users, but only owner can invite an admin', async () => {
+test('only owner can invite users or administrators', async () => {
   async function invite(db, uid, email, role) {
     const batch = writeBatch(db);
     const audit = doc(collection(db, 'activityLogs'));
@@ -126,7 +133,7 @@ test('owner and admin can invite users, but only owner can invite an admin', asy
     batch.set(audit, entry(uid, 'invite_create', email, email));
     return batch.commit();
   }
-  await assertSucceeds(invite(admin, 'admin', 'new-user@example.com', 'user'));
+  await assertFails(invite(admin, 'admin', 'new-user@example.com', 'user'));
   await assertFails(invite(admin, 'admin', 'new-admin@example.com', 'admin'));
   await assertSucceeds(invite(owner, 'owner', 'owner-admin@example.com', 'admin'));
 });
@@ -165,10 +172,10 @@ test('create stores route and audit in one batch', async () => {
 test('activity logs are admin-readable, append-only, and actor-bound', async () => {
   const ref = doc(collection(member, 'activityLogs'));
   await assertSucceeds(setDoc(ref, entry('member', 'login')));
-  await assertSucceeds(getDocs(collection(owner, 'activityLogs')));
-  await assertSucceeds(getDocs(collection(admin, 'activityLogs')));
-  await assertFails(getDocs(collection(member, 'activityLogs')));
-  await assertFails(getDocs(collection(guest, 'activityLogs')));
+  await assertSucceeds(getDocs(query(collection(owner, 'activityLogs'), limit(100))));
+  await assertSucceeds(getDocs(query(collection(admin, 'activityLogs'), limit(100))));
+  await assertFails(getDocs(query(collection(member, 'activityLogs'), limit(100))));
+  await assertFails(getDocs(query(collection(guest, 'activityLogs'), limit(100))));
   await assertFails(updateDoc(doc(owner, 'activityLogs', ref.id), { action: 'logout' }));
   await assertFails(deleteDoc(doc(owner, 'activityLogs', ref.id)));
   await assertFails(setDoc(doc(collection(member, 'activityLogs')), entry('owner', 'login')));
@@ -176,13 +183,32 @@ test('activity logs are admin-readable, append-only, and actor-bound', async () 
   await assertFails(setDoc(doc(collection(member, 'activityLogs')), entry('member', 'update', 'existing')));
 });
 
-test('only owner can append plan image and PDF export activity', async () => {
+test('owner and admin can append plan image and PDF export activity', async () => {
   await assertSucceeds(setDoc(doc(collection(owner, 'activityLogs')), entry('owner', 'plan_image_save', '', 'Community pruning plan')));
   await assertSucceeds(setDoc(doc(collection(owner, 'activityLogs')), entry('owner', 'plan_pdf_save', '', 'Community pruning plan')));
+  await assertSucceeds(setDoc(doc(collection(admin, 'activityLogs')), entry('admin', 'plan_pdf_save', '', 'Community pruning plan')));
   await assertFails(setDoc(doc(collection(member, 'activityLogs')), entry('member', 'plan_pdf_save', '', 'Community pruning plan')));
 });
 
-test('owner delete requires an atomic deletion receipt and activity record', async () => {
+test('drafts and draft assets are restricted to owner and administrators', async () => {
+  const draft = (uid, title) => ({
+    kind: 'work_record', title, data: { title }, createdBy: uid, createdByName: uid,
+    updatedBy: uid, updatedByName: uid, updatedAt: serverTimestamp(), saveMode: 'manual',
+    sizeBytes: 128, assetCount: 0,
+  });
+  await assertSucceeds(setDoc(doc(owner, 'drafts', 'owner-draft'), draft('owner', 'Owner draft')));
+  await assertSucceeds(setDoc(doc(admin, 'drafts', 'admin-draft'), draft('admin', 'Admin draft')));
+  await assertFails(setDoc(doc(member, 'drafts', 'member-draft'), draft('member', 'Member draft')));
+  await assertSucceeds(getDocs(query(collection(owner, 'drafts'), limit(100))));
+  await assertSucceeds(getDocs(query(collection(admin, 'drafts'), limit(100))));
+  await assertFails(getDocs(query(collection(member, 'drafts'), limit(100))));
+  await assertSucceeds(setDoc(doc(owner, 'drafts', 'owner-draft', 'assets', 'cover'), {
+    dataUrl: 'data:image/jpeg;base64,abc', sizeBytes: 26, updatedAt: serverTimestamp(),
+  }));
+  await assertFails(getDoc(doc(member, 'drafts', 'owner-draft', 'assets', 'cover')));
+});
+
+test('owner and admin deletion require an atomic receipt and activity record', async () => {
   await assertFails(deleteDoc(doc(member, 'workRecords', 'delete-me')));
   await assertFails(deleteDoc(doc(owner, 'workRecords', 'delete-me')));
   const batch = writeBatch(owner);
@@ -192,9 +218,17 @@ test('owner delete requires an atomic deletion receipt and activity record', asy
   batch.set(audit, entry('owner', 'delete', 'delete-me'));
   await assertSucceeds(batch.commit());
   assert.equal((await getDoc(doc(owner, 'workRecords', 'delete-me'))).exists(), false);
+
+  const adminBatch = writeBatch(admin);
+  const adminAudit = doc(collection(admin, 'activityLogs'));
+  adminBatch.delete(doc(admin, 'workRecords', 'delete-by-admin'));
+  adminBatch.set(doc(admin, 'recordDeletions', 'delete-by-admin'), { ...entry('admin', 'delete', 'delete-by-admin'), auditId: adminAudit.id });
+  adminBatch.set(adminAudit, entry('admin', 'delete', 'delete-by-admin'));
+  await assertSucceeds(adminBatch.commit());
+  assert.equal((await getDoc(doc(owner, 'workRecords', 'delete-by-admin'))).exists(), false);
 });
 
-test('owner manages roles; admins may only disable or enable ordinary users', async () => {
+test('owner and admin manage other member roles and status, but admin cannot alter itself', async () => {
   const ownerBatch = writeBatch(owner);
   const ownerAudit = doc(collection(owner, 'activityLogs'));
   ownerBatch.update(doc(owner, 'members', 'other'), { role: 'admin', updatedAt: serverTimestamp() });
@@ -206,16 +240,21 @@ test('owner manages roles; admins may only disable or enable ordinary users', as
   adminBatch.update(doc(admin, 'members', 'member'), { status: 'disabled', updatedAt: serverTimestamp() });
   adminBatch.set(adminAudit, entry('admin', 'member_disable', 'member', identity.member));
   await assertSucceeds(adminBatch.commit());
-  await assertFails(updateDoc(doc(admin, 'members', 'other'), { status: 'disabled', updatedAt: serverTimestamp() }));
+  const otherAdminBatch = writeBatch(admin);
+  const otherAdminAudit = doc(collection(admin, 'activityLogs'));
+  otherAdminBatch.update(doc(admin, 'members', 'other'), { status: 'disabled', updatedAt: serverTimestamp() });
+  otherAdminBatch.set(otherAdminAudit, entry('admin', 'member_disable', 'other', identity.other));
+  await assertSucceeds(otherAdminBatch.commit());
+  await assertFails(updateDoc(doc(admin, 'members', 'admin'), { status: 'disabled', updatedAt: serverTimestamp() }));
 });
 
 test('unverified owner email cannot gain owner access', async () => {
   const unverified = env.authenticatedContext('unverified', { email: identity.owner, email_verified: false }).firestore();
-  await assertFails(getDocs(collection(unverified, 'activityLogs')));
+  await assertFails(getDocs(query(collection(unverified, 'activityLogs'), limit(100))));
   await assertFails(getDoc(doc(unverified, 'workRecords', 'existing')));
 });
 
-test('owner can persist edits to an imported static record; members cannot', async () => {
+test('owner and admin can persist edits to imported static records; members cannot', async () => {
   async function persist(db, uid, id) {
     const batch = writeBatch(db);
     const audit = doc(collection(db, 'activityLogs'));
@@ -228,6 +267,7 @@ test('owner can persist edits to an imported static record; members cannot', asy
     return batch.commit();
   }
   await assertSucceeds(persist(owner, 'owner', 'import-record'));
+  await assertSucceeds(persist(admin, 'admin', 'import-record-admin'));
   await assertFails(persist(member, 'member', 'import-not-owner'));
 });
 
