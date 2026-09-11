@@ -102,7 +102,7 @@ import PlanBook, { type PlanDraftData } from './PlanBook';
 import DraftList from './DraftList';
 import ResourceManagement from './ResourceManagement';
 import DispatchOverview from './DispatchOverview';
-import { conflictPersonnelIds } from './scheduling';
+import { conflictPersonnelIds, isPastDate, localIsoDate } from './scheduling';
 import {
   deleteDraftWithAssets,
   saveDraft,
@@ -934,6 +934,10 @@ export default function TreeServApp() {
     }
     if (['已排程', '進行中'].includes(form.scheduleStatus) && !form.workDate) {
       notify('已排程或進行中的紀錄必須填寫施工起始日期。');
+      return;
+    }
+    if (['已排程', '進行中'].includes(form.scheduleStatus) && isPastDate(form.workDate)) {
+      notify('派工日期不可早於今天。');
       return;
     }
     if (['已排程', '進行中'].includes(form.scheduleStatus) && !form.siteLead) {
@@ -2005,8 +2009,8 @@ export default function TreeServApp() {
                         inputLabel: { shrink: true },
                         htmlInput:
                           key === 'workDate'
-                            ? { max: form.endDate || undefined }
-                            : { min: form.workDate || undefined },
+                            ? { min: localIsoDate(), max: form.endDate || undefined }
+                            : { min: form.workDate && form.workDate > localIsoDate() ? form.workDate : localIsoDate() },
                       }
                     : undefined
                 }
