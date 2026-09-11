@@ -46,6 +46,9 @@ import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded';
 import EventRounded from '@mui/icons-material/EventRounded';
 import EditNoteRounded from '@mui/icons-material/EditNoteRounded';
 import SaveRounded from '@mui/icons-material/SaveRounded';
+import GroupsRounded from '@mui/icons-material/GroupsRounded';
+import ConstructionRounded from '@mui/icons-material/ConstructionRounded';
+import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded';
 import {
   AccessDeniedError,
   auditData,
@@ -74,8 +77,22 @@ import {
   type QueryDocumentSnapshot,
   type User,
 } from './firebase';
-import { crewOptions, demoLocations } from './demo-data';
-import type { RoutePoint, SiteLocation, WorkRecord } from './types';
+import { demoLocations } from './demo-data';
+import {
+  equipmentPackageLabels,
+  workRoleLabels,
+  type EquipmentCatalogItem,
+  type EquipmentPackage,
+  type Personnel,
+  type PersonnelAssignment,
+  type RoutePoint,
+  type SiteLocation,
+  type WorkEquipmentItem,
+  type WorkRecord,
+  type WorkRole,
+  type WorkScheduleSlot,
+  type WorkScheduleStatus,
+} from './types';
 import SiteMap from './SiteMap';
 import RouteMap from './RouteMap';
 import HospitalRoute from './HospitalRoute';
@@ -83,6 +100,9 @@ import ActivityLog from './ActivityLog';
 import AccessManagement from './AccessManagement';
 import PlanBook, { type PlanDraftData } from './PlanBook';
 import DraftList from './DraftList';
+import ResourceManagement from './ResourceManagement';
+import DispatchOverview from './DispatchOverview';
+import { conflictPersonnelIds } from './scheduling';
 import {
   deleteDraftWithAssets,
   saveDraft,
@@ -90,7 +110,7 @@ import {
   type DraftDocument,
 } from './drafts';
 
-type View = 'map' | 'access' | 'logs' | 'plan' | 'drafts';
+type View = 'map' | 'access' | 'logs' | 'plan' | 'drafts' | 'resources' | 'dispatch';
 type RecordForm = {
   siteName: string;
   address: string;
@@ -101,6 +121,13 @@ type RecordForm = {
   workDate: string;
   endDate: string;
   crew: string[];
+  siteLead?: PersonnelAssignment;
+  crewAssignments: PersonnelAssignment[];
+  scheduleStatus: WorkScheduleStatus;
+  scheduleSlot: WorkScheduleSlot;
+  estimatedDays: string;
+  workTypes: EquipmentPackage[];
+  equipmentItems: WorkEquipmentItem[];
   meetingTime: string;
   meetingPlace: string;
   mapUrl: string;
@@ -123,6 +150,7 @@ type RecordForm = {
   lat: number;
   lng: number;
 };
+type SiteForm = { name: string; address: string; attention: string };
 type WorkRecordDraftData = {
   form: RecordForm;
   routePoints: RoutePoint[];
@@ -136,16 +164,24 @@ const demos = demoLocations as SiteLocation[];
 const LOCATION_PAGE_SIZE = 50;
 const RECORD_PAGE_SIZE = 20;
 const IMPORT_STATE_LIMIT = 100;
+const RESOURCE_LIMIT = 100;
 const emptyForm: RecordForm = {
   siteName: '',
   address: '',
-  status: '進行中',
+  status: '待排程',
   attention: '',
   title: '',
   notes: '',
   workDate: '',
   endDate: '',
   crew: [],
+  siteLead: undefined,
+  crewAssignments: [],
+  scheduleStatus: '待排程',
+  scheduleSlot: '全天',
+  estimatedDays: '1',
+  workTypes: [],
+  equipmentItems: [],
   meetingTime: '07:30',
   meetingPlace: '',
   mapUrl: '',
@@ -319,12 +355,17 @@ export default function TreeServApp() {
   const [recordCursor, setRecordCursor] = useState<QueryDocumentSnapshot>();
   const [hasMoreRecords, setHasMoreRecords] = useState(false);
   const [recordsLoading, setRecordsLoading] = useState(false);
+  const [scheduledRecords, setScheduledRecords] = useState<WorkRecord[]>([]);
+  const [personnel, setPersonnel] = useState<Personnel[]>([]);
+  const [equipmentCatalog, setEquipmentCatalog] = useState<EquipmentCatalogItem[]>([]);
   const [deletedImports, setDeletedImports] = useState<string[]>([]);
   const [activeId, setActiveId] = useState(demos[0]?.id ?? '');
   const [activeRecordId, setActiveRecordId] = useState('');
   const [search, setSearch] = useState('');
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement>();
   const [recordOpen, setRecordOpen] = useState(false);
+  const [siteOpen, setSiteOpen] = useState(false);
+  const [siteForm, setSiteForm] = useState<SiteForm>({ name: '', address: '', attention: '' });
   const [newSite, setNewSite] = useState(false);
   const [editing, setEditing] = useState<WorkRecord>();
   const [form, setForm] = useState<RecordForm>(emptyForm);
@@ -399,6 +440,9 @@ export default function TreeServApp() {
       setOlderRecords([]);
       setRecordCursor(undefined);
       setHasMoreRecords(false);
+      setScheduledRecords([]);
+      setPersonnel([]);
+      setEquipmentCatalog([]);
       setDeletedImports([]);
       return;
     }
@@ -419,6 +463,21 @@ export default function TreeServApp() {
       },
       () => notify('案場同步暫時中斷。'),
     );
+    const stopPersonnel = onSnapshot(
+      query(collection(db, 'personnel'), orderBy('updatedAt', 'desc'), limit(RESOURCE_LIMIT)),
+      (snapshot) => setPersonnel(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as Personnel)),
+      () => notify('工作人員名單同步暫時中斷。'),
+    );
+    const stopEquipment = onSnapshot(
+      query(collection(db, 'equipmentCatalog'), orderBy('updatedAt', 'desc'), limit(RESOURCE_LIMIT)),
+      (snapshot) => setEquipmentCatalog(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as EquipmentCatalogItem)),
+      () => notify('公裝器材列表同步暫時中斷。'),
+    );
+    const stopSchedule = onSnapshot(
+      query(collection(db, 'workRecords'), where('scheduleStatus', 'in', ['已排程', '進行中']), limit(RESOURCE_LIMIT)),
+      (snapshot) => setScheduledRecords(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as WorkRecord)),
+      () => notify('派工總覽同步暫時中斷。'),
+    );
     void getDocs(
       query(collection(db, 'importedRecordStates'), limit(IMPORT_STATE_LIMIT)),
     ).then(
@@ -432,8 +491,11 @@ export default function TreeServApp() {
     );
     return () => {
       stopLocations();
+      stopPersonnel();
+      stopEquipment();
+      stopSchedule();
     };
-  }, [account?.uid, role]);
+  }, [account, role]);
 
   useEffect(() => {
     setLiveRecords([]);
@@ -464,7 +526,7 @@ export default function TreeServApp() {
         notify('工作紀錄同步暫時中斷。');
       },
     );
-  }, [account?.uid, role, activeId]);
+  }, [account, role, activeId]);
 
   async function loadMoreLocations() {
     if (!db || !locationCursor || locationsLoading) return;
@@ -550,30 +612,28 @@ export default function TreeServApp() {
     ],
     [storedLocations],
   );
-  function locationRecords(location: SiteLocation) {
-    const synced = records.filter(
-      (record) => record.locationId === location.id,
-    );
-    const originals =
-      demos.find((demo) => demo.id === location.id)?.records ?? [];
-    return [
-      ...synced.filter(
-        (record) => !originals.some((original) => original.id === record.id),
-      ),
-      ...originals
-        .filter((record) => !deletedImports.includes(record.id))
-        .map(
-          (record) => synced.find((item) => item.id === record.id) ?? record,
-        ),
-    ];
-  }
   const mapLocations = useMemo(
     () =>
-      locations.map((location) => ({
-        ...location,
-        records: locationRecords(location),
-      })),
-    [locations, records, deletedImports],
+      locations.map((location) => {
+        const localRecords = records.filter((record) => record.locationId === location.id);
+        const synced = [
+          ...localRecords,
+          ...scheduledRecords.filter(
+            (record) => record.locationId === location.id && !localRecords.some((local) => local.id === record.id),
+          ),
+        ];
+        const originals = demos.find((demo) => demo.id === location.id)?.records ?? [];
+        return {
+          ...location,
+          records: [
+            ...synced.filter((record) => !originals.some((original) => original.id === record.id)),
+            ...originals
+              .filter((record) => !deletedImports.includes(record.id))
+              .map((record) => synced.find((item) => item.id === record.id) ?? record),
+          ],
+        };
+      }),
+    [locations, records, scheduledRecords, deletedImports],
   );
   const sortedLocations = useMemo(
     () =>
@@ -595,9 +655,6 @@ export default function TreeServApp() {
   const activeRecord =
     activeRecords.find((record) => record.id === activeRecordId) ??
     activeRecords[0];
-  useEffect(() => {
-    setActiveRecordId(activeRecords[0]?.id ?? '');
-  }, [activeId, activeRecords.map((record) => record.id).join(',')]);
 
   const filteredLocations = useMemo(() => {
     const needle = normalizeSearch(search);
@@ -635,13 +692,65 @@ export default function TreeServApp() {
     }
   }
   const canManage = role === 'owner' || role === 'admin';
+  const activePersonnel = personnel.filter((item) => item.status === 'active');
+  const recordConflictIds = conflictPersonnelIds(
+    {
+      id: editing?.id ?? '', locationId: editing?.locationId ?? activeLocation?.id ?? '', authorName: '',
+      title: form.title, notes: form.notes, imageUrls: [], youtubeUrls: [], fileUrls: [],
+      workDate: form.workDate, endDate: form.endDate, siteLead: form.siteLead,
+      crewAssignments: form.crewAssignments, scheduleStatus: form.scheduleStatus,
+      scheduleSlot: form.scheduleSlot, estimatedDays: Number(form.estimatedDays) || 1,
+    },
+    scheduledRecords,
+  );
+
+  const personnelAssignment = (person: Personnel, assignmentRole: WorkRole): PersonnelAssignment => ({
+    personnelId: person.id,
+    nameSnapshot: person.name,
+    ...(person.code ? { codeSnapshot: person.code } : {}),
+    role: assignmentRole,
+  });
+
+  function setSiteLead(person: Personnel) {
+    setForm((current) => ({
+      ...current,
+      siteLead: current.siteLead?.personnelId === person.id ? undefined : personnelAssignment(person, 'site_manager'),
+    }));
+  }
+
+  function toggleCrewAssignment(person: Personnel, assignmentRole: WorkRole) {
+    setForm((current) => {
+      const exists = current.crewAssignments.some((item) => item.personnelId === person.id && item.role === assignmentRole);
+      return {
+        ...current,
+        crewAssignments: exists
+          ? current.crewAssignments.filter((item) => !(item.personnelId === person.id && item.role === assignmentRole))
+          : [...current.crewAssignments, personnelAssignment(person, assignmentRole)],
+      };
+    });
+  }
+
+  function applyEquipmentDefaults() {
+    const packageNames = new Set<EquipmentPackage>(['general' as EquipmentPackage, ...form.workTypes]);
+    const defaults = equipmentCatalog
+      .filter((item) => item.status === 'active' && item.packages.some((name) => packageNames.has(name)))
+      .map((item) => ({ catalogId: item.id, name: item.name, quantity: item.defaultQuantity, unit: item.unit }));
+    setForm((current) => ({
+      ...current,
+      equipmentItems: [
+        ...current.equipmentItems,
+        ...defaults.filter((item) => !current.equipmentItems.some((selected) => selected.catalogId === item.catalogId)),
+      ],
+    }));
+    notify(defaults.length ? '已帶入所選作業的預設公裝，可繼續調整數量。' : '目前沒有符合的預設公裝，請先至人員與公裝主檔設定。');
+  }
   const recordDraftPayload = useMemo<WorkRecordDraftData>(() => ({
     form,
     routePoints,
     routeNotes,
     newSite,
     ...(editing?.id ? { editingId: editing.id, editingLocationId: editing.locationId } : {}),
-  }), [form, routePoints, routeNotes, newSite, editing?.id, editing?.locationId]);
+  }), [form, routePoints, routeNotes, newSite, editing]);
   const recordDraftSignature = useMemo(() => JSON.stringify(recordDraftPayload), [recordDraftPayload]);
   recordDraftPayloadRef.current = recordDraftPayload;
 
@@ -716,6 +825,9 @@ export default function TreeServApp() {
       address: forCurrentSite ? (current?.address ?? '') : '',
       lat: forCurrentSite ? (current?.lat ?? emptyForm.lat) : emptyForm.lat,
       lng: forCurrentSite ? (current?.lng ?? emptyForm.lng) : emptyForm.lng,
+      crewAssignments: [],
+      equipmentItems: [],
+      workTypes: [],
     });
     setRoutePoints([]);
     setRouteNotes('');
@@ -739,6 +851,11 @@ export default function TreeServApp() {
       lat: location?.lat ?? emptyForm.lat,
       lng: location?.lng ?? emptyForm.lng,
       crew: [...(record.crew ?? [])],
+      siteLead: record.siteLead ? { ...record.siteLead } : undefined,
+      crewAssignments: (record.crewAssignments ?? []).map((item) => ({ ...item })),
+      equipmentItems: (record.equipmentItems ?? []).map((item) => ({ ...item })),
+      workTypes: [...(record.workTypes ?? [])],
+      estimatedDays: String(record.estimatedDays ?? 1),
       imageUrls: (record.imageUrls ?? []).join('\n'),
       youtubeUrls: (record.youtubeUrls ?? []).join('\n'),
       fileUrls: (record.fileUrls ?? []).join('\n'),
@@ -775,7 +892,14 @@ export default function TreeServApp() {
     if (data.editingLocationId) setActiveId(data.editingLocationId);
     setEditing(sourceRecord);
     setNewSite(Boolean(data.newSite));
-    setForm({ ...emptyForm, ...data.form, crew: [...(data.form.crew ?? [])] });
+    setForm({
+      ...emptyForm,
+      ...data.form,
+      crew: [...(data.form.crew ?? [])],
+      crewAssignments: (data.form.crewAssignments ?? []).map((item) => ({ ...item })),
+      equipmentItems: (data.form.equipmentItems ?? []).map((item) => ({ ...item })),
+      workTypes: [...(data.form.workTypes ?? [])],
+    });
     setRoutePoints((data.routePoints ?? []).map((point) => ({ ...point })));
     setRouteNotes(data.routeNotes ?? '');
     setRecordDraftId(draft.id);
@@ -808,6 +932,14 @@ export default function TreeServApp() {
       notify('施工結束日期不可早於起始日期。');
       return;
     }
+    if (['已排程', '進行中'].includes(form.scheduleStatus) && !form.workDate) {
+      notify('已排程或進行中的紀錄必須填寫施工起始日期。');
+      return;
+    }
+    if (['已排程', '進行中'].includes(form.scheduleStatus) && !form.siteLead) {
+      notify('已排程或進行中的紀錄必須指定案場負責人。');
+      return;
+    }
     setSaving(true);
     try {
       const batch = writeBatch(db),
@@ -837,6 +969,15 @@ export default function TreeServApp() {
         workDate: form.workDate,
         endDate: form.endDate,
         crew: form.crew,
+        siteLead: form.siteLead ?? null,
+        crewAssignments: form.crewAssignments,
+        scheduleStatus: form.scheduleStatus,
+        scheduleSlot: form.scheduleSlot,
+        estimatedDays: Math.max(0.5, Number(form.estimatedDays) || 1),
+        workTypes: form.workTypes,
+        equipmentItems: form.equipmentItems
+          .filter((item) => item.name.trim())
+          .map((item) => ({ ...item, name: item.name.trim(), unit: item.unit.trim() || '組', quantity: Math.max(0.5, Number(item.quantity) || 1) })),
         meetingTime: form.meetingTime.trim(),
         meetingPlace: form.meetingPlace.trim(),
         mapUrl: form.mapUrl.trim(),
@@ -914,6 +1055,42 @@ export default function TreeServApp() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function createSite() {
+    if (!db || !account || !siteForm.name.trim() || !siteForm.address.trim()) {
+      notify('請填寫案場名稱與地址。');
+      return;
+    }
+    setSaving(true);
+    try {
+      const duplicate = sortedLocations.find(
+        (location) => normalizeSearch(location.name) === normalizeSearch(siteForm.name) || normalizeSearch(location.address) === normalizeSearch(siteForm.address),
+      );
+      if (duplicate) {
+        setActiveId(duplicate.id);
+        setSiteOpen(false);
+        setView('map');
+        notify(`已切換到現有案場「${duplicate.name}」。`);
+        return;
+      }
+      const point = await geocodeAddress(siteForm.address.trim());
+      const siteRef = doc(collection(db, 'locations'));
+      const batch = writeBatch(db);
+      batch.set(siteRef, {
+        name: siteForm.name.trim(), address: siteForm.address.trim(), attention: siteForm.attention.trim(),
+        status: '待排程', aliases: [], lat: point.lat, lng: point.lng,
+        createdBy: account.uid, updatedAt: serverTimestamp(),
+      });
+      await batch.commit();
+      setActiveId(siteRef.id);
+      setSiteOpen(false);
+      setSiteForm({ name: '', address: '', attention: '' });
+      setView('map');
+      notify('案場已建立；請在案場內按「新增」建立工作紀錄。');
+    } catch (error) {
+      notify(error instanceof Error && error.message === 'address-not-found' ? '找不到這個地址，請補充縣市、區域或門牌後再試。' : '案場建立失敗，請稍後再試。');
+    } finally { setSaving(false); }
   }
   function requestSave() {
     if (editing) {
@@ -1096,12 +1273,12 @@ export default function TreeServApp() {
     ['hospitalDistance', '醫院距離'],
     ['hospitalTravelTime', '車程'],
     ['workDetails', '詳細工作內容', true],
-    ['assignments', '人員分組／協力', true],
+    ['assignments', '其他人員分工補充', true],
     ['crane', '吊車'],
     ['disposal', '清運'],
     ['parking', '停車／卸裝備', true],
     ['roadPermit', '路權'],
-    ['equipment', '裝備與工具', true],
+    ['equipment', '器材補充說明', true],
     ['safetyNotes', '安全與進場注意', true],
     ['imageUrls', '圖片網址（每行一個）', true],
     ['youtubeUrls', 'YouTube 網址（每行一個）', true],
@@ -1159,9 +1336,9 @@ export default function TreeServApp() {
             sx={{ display: { xs: 'none', md: 'inline-flex' } }}
             variant="contained"
             startIcon={<AddRounded />}
-            onClick={() => openCreate(false)}
+            onClick={() => setSiteOpen(true)}
           >
-            建立工作紀錄
+            建立案場紀錄
           </Button>
           {canManage && (
             <Button
@@ -1219,12 +1396,12 @@ export default function TreeServApp() {
         <Divider />
         <MenuItem
           onClick={() => {
-            openCreate(false);
+            setSiteOpen(true);
             setMenuAnchor(undefined);
           }}
         >
           <AddRounded sx={{ mr: 1.5 }} />
-          建立工作紀錄
+          建立案場紀錄
         </MenuItem>
         <MenuItem
           onClick={() => {
@@ -1235,6 +1412,28 @@ export default function TreeServApp() {
           <MapRounded sx={{ mr: 1.5 }} />
           案場地圖
         </MenuItem>
+        {canManage && (
+          <MenuItem
+            onClick={() => {
+              setView('dispatch');
+              setMenuAnchor(undefined);
+            }}
+          >
+            <CalendarMonthRounded sx={{ mr: 1.5 }} />
+            派工總覽與行事曆
+          </MenuItem>
+        )}
+        {canManage && (
+          <MenuItem
+            onClick={() => {
+              setView('resources');
+              setMenuAnchor(undefined);
+            }}
+          >
+            <GroupsRounded sx={{ mr: 1.5 }} />
+            人員與公裝主檔
+          </MenuItem>
+        )}
         {canManage && (
           <MenuItem
             onClick={() => {
@@ -1298,6 +1497,19 @@ export default function TreeServApp() {
               setView('map');
               void openWorkDraft(draft as DraftDocument<WorkRecordDraftData>);
             }
+          }}
+        />
+      ) : view === 'resources' && canManage ? (
+        <ResourceManagement account={account} notify={notify} />
+      ) : view === 'dispatch' && canManage ? (
+        <DispatchOverview
+          records={scheduledRecords}
+          locations={sortedLocations}
+          personnel={personnel}
+          onOpen={(record) => {
+            setActiveId(record.locationId);
+            setActiveRecordId(record.id);
+            setView('map');
           }}
         />
       ) : view === 'access' && canManage ? (
@@ -1397,7 +1609,7 @@ export default function TreeServApp() {
                     startIcon={<AddRounded />}
                     onClick={() => openCreate(true)}
                   >
-                    新增
+                    新增工作紀錄
                   </Button>
                 </Stack>
                 {activeRecords.length > 1 && (
@@ -1452,6 +1664,10 @@ export default function TreeServApp() {
                         <Typography variant="h6">
                           {activeRecord.title}
                         </Typography>
+                        <Stack direction="row" sx={{ gap: 1, flexWrap: 'wrap', mt: 0.75 }}>
+                          {activeRecord.scheduleStatus && <Chip size="small" color={activeRecord.scheduleStatus === '取消' ? 'default' : 'primary'} label={activeRecord.scheduleStatus} />}
+                          {activeRecord.estimatedDays && <Chip size="small" variant="outlined" label={`預估 ${activeRecord.estimatedDays} 天 · ${activeRecord.scheduleSlot ?? '全天'}`} />}
+                        </Stack>
                         <Typography sx={{ whiteSpace: 'pre-wrap' }}>
                           <LinkifiedText>{activeRecord.notes}</LinkifiedText>
                         </Typography>
@@ -1493,6 +1709,26 @@ export default function TreeServApp() {
                           {activeRecord.safetyNotes}
                         </Alert>
                       )}
+                      {(activeRecord.siteLead || (activeRecord.crewAssignments?.length ?? 0) > 0 || (activeRecord.crew?.length ?? 0) > 0) && (
+                        <Paper variant="outlined" sx={{ p: 2 }}>
+                          <Typography sx={{ fontWeight: 800, mb: 1.5 }}>案場人力配置</Typography>
+                          {activeRecord.siteLead && (() => {
+                            const current = personnel.find((item) => item.id === activeRecord.siteLead!.personnelId);
+                            const archived = !current || current.status === 'archived';
+                            return <Box sx={{ mb: 1.5 }}><Typography variant="caption" color="text.secondary">案場負責人</Typography><Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}><Typography>{current?.name ?? activeRecord.siteLead.nameSnapshot}{current?.code || activeRecord.siteLead.codeSnapshot ? `（${current?.code ?? activeRecord.siteLead.codeSnapshot}）` : ''}</Typography>{archived && <Chip size="small" label="已封存" />}</Stack></Box>;
+                          })()}
+                          {(Object.entries(workRoleLabels) as [WorkRole, string][]).filter(([key]) => key !== 'site_manager').map(([key, label]) => {
+                            const assigned = (activeRecord.crewAssignments ?? []).filter((item) => item.role === key);
+                            if (!assigned.length) return null;
+                            return <Box key={key} sx={{ mb: 1.25 }}><Typography variant="caption" color="text.secondary">{label}</Typography><Stack direction="row" sx={{ gap: 0.75, flexWrap: 'wrap' }}>{assigned.map((assignment) => {
+                              const current = personnel.find((item) => item.id === assignment.personnelId);
+                              const archived = !current || current.status === 'archived';
+                              return <Chip key={assignment.personnelId} label={`${current?.name ?? assignment.nameSnapshot}${current?.code || assignment.codeSnapshot ? ` · ${current?.code ?? assignment.codeSnapshot}` : ''}`} color={archived ? 'default' : 'secondary'} variant={archived ? 'outlined' : 'filled'} />;
+                            })}</Stack></Box>;
+                          })}
+                          {(activeRecord.crew?.length ?? 0) > 0 && <Box><Typography variant="caption" color="text.secondary">舊紀錄參與人員</Typography><Stack direction="row" sx={{ gap: 0.75, flexWrap: 'wrap' }}>{activeRecord.crew!.map((name, index) => <Chip key={`${name}-${index}`} variant="outlined" label={`${name} · 舊名單`} />)}</Stack></Box>}
+                        </Paper>
+                      )}
                       {[
                         [
                           '集合',
@@ -1523,6 +1759,7 @@ export default function TreeServApp() {
                             </Typography>
                           </Box>
                         ))}
+                      {(activeRecord.equipmentItems?.length ?? 0) > 0 && <Box><Typography variant="caption" color="text.secondary">公裝器材清單</Typography><Stack direction="row" sx={{ gap: 0.75, flexWrap: 'wrap', mt: 0.5 }}>{activeRecord.equipmentItems!.map((item, index) => <Chip key={`${item.catalogId ?? item.name}-${index}`} icon={<ConstructionRounded />} label={`${item.name} ${item.quantity} ${item.unit}`} />)}</Stack></Box>}
                       {activeRecord.hospitalName && (
                         <Box>
                           <Typography variant="caption" color="text.secondary">
@@ -1660,6 +1897,19 @@ export default function TreeServApp() {
         </Box>
       )}
 
+      <Dialog open={siteOpen} onClose={() => !saving && setSiteOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>建立案場紀錄</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Alert severity="info">先建立案場位置與注意事項。建立完成後，再到該案場按「新增工作紀錄」安排日期、人員與器材。</Alert>
+            <TextField required label="案場名稱" value={siteForm.name} onChange={(event) => setSiteForm((current) => ({ ...current, name: event.target.value }))} />
+            <TextField required label="地址" value={siteForm.address} onChange={(event) => setSiteForm((current) => ({ ...current, address: event.target.value }))} />
+            <TextField multiline minRows={3} label="進場與安全注意" value={siteForm.attention} onChange={(event) => setSiteForm((current) => ({ ...current, attention: event.target.value }))} />
+          </Stack>
+        </DialogContent>
+        <DialogActions><Button disabled={saving} onClick={() => setSiteOpen(false)}>取消</Button><Button disabled={saving} variant="contained" onClick={createSite}>{saving ? '建立中…' : '建立案場'}</Button></DialogActions>
+      </Dialog>
+
       <Dialog
         open={recordOpen}
         onClose={() => !saving && setRecordOpen(false)}
@@ -1720,8 +1970,25 @@ export default function TreeServApp() {
               </Paper>
             )}
             <Typography variant="subtitle1" sx={{ fontWeight: 750 }}>
-              工作內容
+              排程與基本資料
             </Typography>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <TextField select fullWidth label="派工狀態" value={form.scheduleStatus} onChange={(event) => setForm((current) => ({ ...current, scheduleStatus: event.target.value as WorkScheduleStatus }))}>
+                {(['待排程', '已排程', '進行中', '已完成', '取消'] as WorkScheduleStatus[]).map((status) => <MenuItem key={status} value={status}>{status}</MenuItem>)}
+              </TextField>
+              <TextField select fullWidth label="作業時段" value={form.scheduleSlot} onChange={(event) => setForm((current) => ({ ...current, scheduleSlot: event.target.value as WorkScheduleSlot }))}>
+                {(['全天', '上午', '下午'] as WorkScheduleSlot[]).map((slot) => <MenuItem key={slot} value={slot}>{slot}</MenuItem>)}
+              </TextField>
+              <TextField fullWidth type="number" label="預估工時（天）" value={form.estimatedDays} onChange={setField('estimatedDays')} slotProps={{ htmlInput: { min: 0.5, step: 0.5 }, inputLabel: { shrink: true } }} />
+            </Stack>
+            <Box>
+              <Typography variant="subtitle1" sx={{ fontWeight: 750, mb: 1 }}>案場負責人</Typography>
+              {!activePersonnel.length ? <Alert severity="info" action={canManage ? <Button color="inherit" onClick={() => { setRecordOpen(false); setView('resources'); }}>建立名單</Button> : undefined}>目前沒有可用的工作人員名單。</Alert> : <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>
+                {activePersonnel.filter((person) => !person.allowedRoles.length || person.allowedRoles.includes('site_manager')).map((person) => <Chip key={person.id} clickable color={form.siteLead?.personnelId === person.id ? 'primary' : 'default'} label={`${person.name}${person.code ? ` · ${person.code}` : ''}`} onClick={() => setSiteLead(person)} />)}
+              </Stack>}
+              {form.siteLead && !activePersonnel.some((person) => person.id === form.siteLead!.personnelId) && <Chip sx={{ mt: 1, bgcolor: 'action.disabledBackground' }} onDelete={() => setForm((current) => ({ ...current, siteLead: undefined }))} label={`${personnel.find((item) => item.id === form.siteLead!.personnelId)?.name ?? form.siteLead.nameSnapshot} · 已封存`} />}
+            </Box>
+            {recordConflictIds.length > 0 && <Alert severity="warning">排程提醒：{recordConflictIds.map((id) => personnel.find((item) => item.id === id)?.name ?? form.crewAssignments.find((item) => item.personnelId === id)?.nameSnapshot ?? form.siteLead?.nameSnapshot).filter(Boolean).join('、')} 在重疊時段已有其他案場。仍可儲存本紀錄。</Alert>}
             {labels.map(([key, label, multiline]) => (
               <TextField
                 key={key}
@@ -1747,25 +2014,38 @@ export default function TreeServApp() {
             ))}
             <Box>
               <Typography variant="subtitle1" sx={{ fontWeight: 750, mb: 1 }}>
-                參與人員
+                其他參與人員與角色
               </Typography>
-              <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>
-                {crewOptions.map((name) => (
-                  <Chip
-                    key={name}
-                    clickable
-                    color={form.crew.includes(name) ? 'primary' : 'default'}
-                    label={name}
-                    onClick={() =>
-                      setForm((current) => ({
-                        ...current,
-                        crew: current.crew.includes(name)
-                          ? current.crew.filter((item) => item !== name)
-                          : [...current.crew, name],
-                      }))
-                    }
-                  />
-                ))}
+              <Stack spacing={2}>
+                {(Object.entries(workRoleLabels) as [WorkRole, string][]).filter(([roleName]) => roleName !== 'site_manager').map(([roleName, label]) => {
+                  const archived = form.crewAssignments.filter((assignment) => assignment.role === roleName && !activePersonnel.some((person) => person.id === assignment.personnelId));
+                  return <Box key={roleName}><Typography variant="body2" color="text.secondary" sx={{ mb: 0.75 }}>{label}</Typography><Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.75 }}>
+                    {activePersonnel.filter((person) => !person.allowedRoles.length || person.allowedRoles.includes(roleName)).map((person) => {
+                      const selected = form.crewAssignments.some((assignment) => assignment.personnelId === person.id && assignment.role === roleName);
+                      return <Chip key={person.id} clickable color={selected ? 'secondary' : 'default'} label={`${person.name}${person.code ? ` · ${person.code}` : ''}`} onClick={() => toggleCrewAssignment(person, roleName)} />;
+                    })}
+                    {archived.map((assignment) => <Chip key={assignment.personnelId} sx={{ bgcolor: 'action.disabledBackground' }} label={`${personnel.find((item) => item.id === assignment.personnelId)?.name ?? assignment.nameSnapshot} · 已封存`} onDelete={() => setForm((current) => ({ ...current, crewAssignments: current.crewAssignments.filter((item) => !(item.personnelId === assignment.personnelId && item.role === roleName)) }))} />)}
+                  </Stack></Box>;
+                })}
+                {form.crew.length > 0 && <Alert severity="info">這是舊紀錄的人員名單：<Stack component="span" direction="row" sx={{ display: 'inline-flex', gap: 0.5, ml: 1, flexWrap: 'wrap' }}>{form.crew.map((name, index) => <Chip key={`${name}-${index}`} size="small" label={`${name} · 舊名單`} onDelete={() => setForm((current) => ({ ...current, crew: current.crew.filter((_, itemIndex) => itemIndex !== index) }))} />)}</Stack>舊名單人員可移除，但不能重新加入。</Alert>}
+              </Stack>
+            </Box>
+            <Divider />
+            <Box>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' }, mb: 1 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 750 }}>公裝器材準備</Typography>
+                <Button startIcon={<ConstructionRounded />} variant="outlined" onClick={applyEquipmentDefaults}>帶入預設套裝</Button>
+              </Stack>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>先選作業類型，再帶入管理員設定的預設器材；帶入後可自由增減與修改。</Typography>
+              <Stack direction="row" sx={{ gap: 0.75, flexWrap: 'wrap', mb: 2 }}>{(Object.entries(equipmentPackageLabels) as [EquipmentPackage, string][]).filter(([name]) => name !== 'general').map(([name, label]) => <Chip key={name} clickable color={form.workTypes.includes(name) ? 'primary' : 'default'} label={label} onClick={() => setForm((current) => ({ ...current, workTypes: current.workTypes.includes(name) ? current.workTypes.filter((item) => item !== name) : [...current.workTypes, name] }))} />)}</Stack>
+              <Stack spacing={1}>
+                {form.equipmentItems.map((item, index) => <Stack key={`${item.catalogId ?? 'manual'}-${index}`} direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                  <TextField fullWidth size="small" label="器材" value={item.name} onChange={(event) => setForm((current) => ({ ...current, equipmentItems: current.equipmentItems.map((currentItem, itemIndex) => itemIndex === index ? { ...currentItem, name: event.target.value } : currentItem) }))} />
+                  <TextField size="small" type="number" label="數量" value={item.quantity} sx={{ width: { sm: 120 } }} slotProps={{ htmlInput: { min: 0.5, step: 0.5 } }} onChange={(event) => setForm((current) => ({ ...current, equipmentItems: current.equipmentItems.map((currentItem, itemIndex) => itemIndex === index ? { ...currentItem, quantity: Number(event.target.value) } : currentItem) }))} />
+                  <TextField size="small" label="單位" value={item.unit} sx={{ width: { sm: 120 } }} onChange={(event) => setForm((current) => ({ ...current, equipmentItems: current.equipmentItems.map((currentItem, itemIndex) => itemIndex === index ? { ...currentItem, unit: event.target.value } : currentItem) }))} />
+                  <Button color="error" onClick={() => setForm((current) => ({ ...current, equipmentItems: current.equipmentItems.filter((_, itemIndex) => itemIndex !== index) }))}>移除</Button>
+                </Stack>)}
+                <Button sx={{ alignSelf: 'flex-start' }} startIcon={<AddRounded />} onClick={() => setForm((current) => ({ ...current, equipmentItems: [...current.equipmentItems, { name: '', quantity: 1, unit: '組' }] }))}>手動新增器材</Button>
               </Stack>
             </Box>
             <Divider />

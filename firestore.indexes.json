@@ -19,6 +19,12 @@
     { "collectionGroup": "workRecords", "fieldPath": "imageUrls", "indexes": [] },
     { "collectionGroup": "workRecords", "fieldPath": "youtubeUrls", "indexes": [] },
     { "collectionGroup": "workRecords", "fieldPath": "fileUrls", "indexes": [] },
+    { "collectionGroup": "workRecords", "fieldPath": "crewAssignments", "indexes": [] },
+    { "collectionGroup": "workRecords", "fieldPath": "equipmentItems", "indexes": [] },
+    { "collectionGroup": "workRecords", "fieldPath": "workTypes", "indexes": [] },
+    { "collectionGroup": "personnel", "fieldPath": "skills", "indexes": [] },
+    { "collectionGroup": "personnel", "fieldPath": "allowedRoles", "indexes": [] },
+    { "collectionGroup": "equipmentCatalog", "fieldPath": "packages", "indexes": [] },
     { "collectionGroup": "drafts", "fieldPath": "data", "indexes": [] }
   ]
 }

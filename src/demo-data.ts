@@ -4,8 +4,6 @@ function record<T extends ImportedRecord>(id:string, locationId:string, fields:T
   return { id, locationId, imageUrls:[], youtubeUrls:[], fileUrls:[], authorName:'群組案場紀錄', ...fields };
 }
 
-export const crewOptions = ['白','肯','誠','浩','儀','庭','修','陳','得','丸','鴻','橘','球','韻','歐','力','綺','斌','薛','康','方'];
-
 export const demoLocations = [
   {
     id:'import-zhishan', name:'芝山文化生態綠園', address:'臺北市士林區芝山文化生態綠園', lat:25.1042763, lng:121.5319248, status:'注意事項', aliases:['芝山綠園','暖房'], isDemo:true,

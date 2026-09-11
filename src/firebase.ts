@@ -151,7 +151,9 @@ export type AuditAction =
   | 'login' | 'logout' | 'create' | 'edit' | 'update' | 'delete'
   | 'plan_image_save' | 'plan_pdf_save'
   | 'invite_create' | 'invite_revoke' | 'invite_accept'
-  | 'member_role' | 'member_enable' | 'member_disable';
+  | 'member_role' | 'member_enable' | 'member_disable'
+  | 'personnel_create' | 'personnel_update'
+  | 'equipment_create' | 'equipment_update';
 
 export function auditData(account: User, action: AuditAction, recordId = '', recordTitle = '') {
   return {

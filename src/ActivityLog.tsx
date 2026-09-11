@@ -12,6 +12,8 @@ const labels: Record<string, string> = {
   login: '登入', logout: '登出', create: '建立紀錄', edit: '開啟編輯', update: '更新紀錄', delete: '刪除紀錄',
   plan_image_save: '儲存計畫圖面', plan_pdf_save: '儲存計畫書 PDF', invite_create: '發出邀請',
   invite_revoke: '撤銷邀請', invite_accept: '接受邀請', member_role: '調整角色', member_enable: '啟用帳號', member_disable: '停用帳號',
+  personnel_create: '新增工作人員', personnel_update: '更新工作人員',
+  equipment_create: '新增公裝器材', equipment_update: '更新公裝器材',
 };
 
 function formatTime(value: any) {

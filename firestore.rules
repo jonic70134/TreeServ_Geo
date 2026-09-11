@@ -54,6 +54,50 @@ service cloud.firestore {
         && entry.timestamp == request.time;
     }
 
+    function validPersonnel() {
+      let item = request.resource.data;
+      return item.keys().hasOnly([
+          'name', 'code', 'jobTitle', 'note', 'skills', 'allowedRoles', 'status',
+          'createdBy', 'createdAt', 'updatedAt', 'lastAuditId'
+        ])
+        && item.name is string
+        && item.name.size() > 0
+        && item.name.size() <= 160
+        && item.code is string
+        && item.code.size() <= 80
+        && item.jobTitle is string
+        && item.jobTitle.size() <= 120
+        && item.note is string
+        && item.note.size() <= 1000
+        && item.skills is list
+        && item.skills.size() <= 20
+        && item.allowedRoles is list
+        && item.allowedRoles.size() <= 6
+        && item.status in ['active', 'archived']
+        && item.updatedAt == request.time;
+    }
+
+    function validEquipment() {
+      let item = request.resource.data;
+      return item.keys().hasOnly([
+          'name', 'unit', 'defaultQuantity', 'packages', 'note', 'status',
+          'createdBy', 'createdAt', 'updatedAt', 'lastAuditId'
+        ])
+        && item.name is string
+        && item.name.size() > 0
+        && item.name.size() <= 200
+        && item.unit is string
+        && item.unit.size() <= 40
+        && item.defaultQuantity is number
+        && item.defaultQuantity > 0
+        && item.packages is list
+        && item.packages.size() <= 5
+        && item.note is string
+        && item.note.size() <= 1000
+        && item.status in ['active', 'archived']
+        && item.updatedAt == request.time;
+    }
+
     function validActivityShape() {
       let entry = request.resource.data;
       return signedIn()
@@ -107,6 +151,34 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/recordDeletions/$(recordId)).data.actorId == request.auth.uid;
     }
 
+    match /personnel/{personnelId} {
+      allow get: if hasAccess();
+      allow list: if hasAccess() && boundedList(100);
+      allow create: if isAdmin()
+        && validPersonnel()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+      allow update: if isAdmin()
+        && validPersonnel()
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if false;
+    }
+
+    match /equipmentCatalog/{equipmentId} {
+      allow get: if hasAccess();
+      allow list: if hasAccess() && boundedList(100);
+      allow create: if isAdmin()
+        && validEquipment()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+      allow update: if isAdmin()
+        && validEquipment()
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if false;
+    }
+
     match /activityLogs/{entryId} {
       allow get: if isAdmin();
       allow list: if isAdmin() && boundedList(100);
@@ -127,6 +199,10 @@ service cloud.firestore {
         || (request.resource.data.action in ['invite_create', 'invite_revoke']
           && isOwner())
         || (request.resource.data.action in ['member_role', 'member_enable', 'member_disable']
+          && isAdmin())
+        || (request.resource.data.action in ['personnel_create', 'personnel_update']
+          && isAdmin())
+        || (request.resource.data.action in ['equipment_create', 'equipment_update']
           && isAdmin())
         || (request.resource.data.action == 'edit'
           && hasAccess()

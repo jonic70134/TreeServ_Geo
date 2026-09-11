@@ -105,6 +105,47 @@ test('collection reads must declare a limit of at most 100 documents', async () 
   await assertSucceeds(getDoc(doc(owner, 'workRecords', 'existing')));
 });
 
+test('personnel and equipment master data are readable by active members but only managed by admins', async () => {
+  async function createPersonnel(db, uid, id) {
+    const batch = writeBatch(db);
+    const audit = doc(collection(db, 'activityLogs'));
+    batch.set(doc(db, 'personnel', id), {
+      name: '小陳', code: '1 號', jobTitle: '攀樹師', note: '', skills: ['攀樹'],
+      allowedRoles: ['climber'], status: 'active', createdBy: uid,
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(), lastAuditId: audit.id,
+    });
+    batch.set(audit, entry(uid, 'personnel_create', id, '小陳'));
+    return batch.commit();
+  }
+  await assertSucceeds(createPersonnel(owner, 'owner', 'person-owner'));
+  await assertSucceeds(createPersonnel(admin, 'admin', 'person-admin'));
+  await assertFails(createPersonnel(member, 'member', 'person-member'));
+  await assertSucceeds(getDocs(query(collection(member, 'personnel'), limit(100))));
+  await assertFails(getDocs(query(collection(disabled, 'personnel'), limit(100))));
+
+  const equipmentBatch = writeBatch(admin);
+  const equipmentAudit = doc(collection(admin, 'activityLogs'));
+  equipmentBatch.set(doc(admin, 'equipmentCatalog', 'spurs'), {
+    name: '馬刺', unit: '組', defaultQuantity: 1, packages: ['climbing'], note: '',
+    status: 'active', createdBy: 'admin', createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(), lastAuditId: equipmentAudit.id,
+  });
+  equipmentBatch.set(equipmentAudit, entry('admin', 'equipment_create', 'spurs', '馬刺'));
+  await assertSucceeds(equipmentBatch.commit());
+  await assertSucceeds(getDoc(doc(member, 'equipmentCatalog', 'spurs')));
+  await assertFails(deleteDoc(doc(owner, 'equipmentCatalog', 'spurs')));
+
+  const archiveBatch = writeBatch(owner);
+  const archiveAudit = doc(collection(owner, 'activityLogs'));
+  archiveBatch.update(doc(owner, 'personnel', 'person-owner'), {
+    status: 'archived', updatedAt: serverTimestamp(), lastAuditId: archiveAudit.id,
+  });
+  archiveBatch.set(archiveAudit, entry('owner', 'personnel_update', 'person-owner', '小陳'));
+  await assertSucceeds(archiveBatch.commit());
+  assert.equal((await getDoc(doc(member, 'personnel', 'person-owner'))).data().status, 'archived');
+  await assertFails(deleteDoc(doc(owner, 'personnel', 'person-owner')));
+});
+
 test('pending invite can only be accepted by the matching verified Google account', async () => {
   await assertFails(getDoc(doc(invitee, 'workRecords', 'existing')));
   const batch = writeBatch(invitee);
