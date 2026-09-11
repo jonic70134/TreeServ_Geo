@@ -14,7 +14,7 @@ import {
 } from 'firebase/auth';
 import {
   addDoc, collection, deleteDoc, doc, getDoc, getFirestore, onSnapshot, orderBy, query,
-  serverTimestamp, setDoc, updateDoc, writeBatch, limit, getDocs, startAfter,
+  serverTimestamp, setDoc, updateDoc, writeBatch, limit, getDocs, startAfter, where,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { getRuntimeConfig } from './runtime-config';
@@ -172,6 +172,6 @@ export async function logActivity(account: User, action: AuditAction, recordId =
 
 export {
   signOut, onAuthStateChanged, addDoc, collection, deleteDoc, doc, getDoc, onSnapshot,
-  orderBy, query, serverTimestamp, setDoc, updateDoc, writeBatch, limit, getDocs, startAfter,
+  orderBy, query, serverTimestamp, setDoc, updateDoc, writeBatch, limit, getDocs, startAfter, where,
 };
 export type { QueryDocumentSnapshot, User };

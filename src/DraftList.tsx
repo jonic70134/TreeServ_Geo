@@ -18,7 +18,7 @@ import {
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import DescriptionRounded from '@mui/icons-material/DescriptionRounded';
 import EditNoteRounded from '@mui/icons-material/EditNoteRounded';
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { db } from './firebase';
 import { deleteDraftWithAssets, type DraftDocument } from './drafts';
 
@@ -51,7 +51,7 @@ export default function DraftList({
   useEffect(() => {
     if (!db) { setLoading(false); return; }
     return onSnapshot(
-      query(collection(db, 'drafts'), orderBy('updatedAt', 'desc')),
+      query(collection(db, 'drafts'), orderBy('updatedAt', 'desc'), limit(50)),
       (snapshot) => {
         setDrafts(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }) as DraftDocument));
         setLoading(false);

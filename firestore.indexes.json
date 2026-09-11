@@ -1,4 +1,24 @@
 {
-  "indexes": [],
-  "fieldOverrides": []
+  "indexes": [
+    {
+      "collectionGroup": "workRecords",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "locationId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    { "collectionGroup": "locations", "fieldPath": "attention", "indexes": [] },
+    { "collectionGroup": "workRecords", "fieldPath": "notes", "indexes": [] },
+    { "collectionGroup": "workRecords", "fieldPath": "workDetails", "indexes": [] },
+    { "collectionGroup": "workRecords", "fieldPath": "assignments", "indexes": [] },
+    { "collectionGroup": "workRecords", "fieldPath": "safetyNotes", "indexes": [] },
+    { "collectionGroup": "workRecords", "fieldPath": "routePoints", "indexes": [] },
+    { "collectionGroup": "workRecords", "fieldPath": "imageUrls", "indexes": [] },
+    { "collectionGroup": "workRecords", "fieldPath": "youtubeUrls", "indexes": [] },
+    { "collectionGroup": "workRecords", "fieldPath": "fileUrls", "indexes": [] },
+    { "collectionGroup": "drafts", "fieldPath": "data", "indexes": [] }
+  ]
 }

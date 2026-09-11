@@ -36,6 +36,10 @@ service cloud.firestore {
       return isOwner() || (isActiveMember() && member().role == 'admin');
     }
 
+    function boundedList(maximum) {
+      return request.query.limit != null && request.query.limit <= maximum;
+    }
+
     function allowedInviteRole(role) {
       return role in ['admin', 'user'];
     }
@@ -66,7 +70,8 @@ service cloud.firestore {
     }
 
     match /locations/{locationId} {
-      allow read: if hasAccess();
+      allow get: if hasAccess();
+      allow list: if hasAccess() && boundedList(100);
       allow create: if hasAccess()
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.name is string
@@ -78,7 +83,8 @@ service cloud.firestore {
     }
 
     match /workRecords/{recordId} {
-      allow read: if hasAccess();
+      allow get: if hasAccess();
+      allow list: if hasAccess() && boundedList(100);
       allow create: if hasAccess()
         && request.resource.data.authorId == request.auth.uid
         && request.resource.data.title is string
@@ -102,7 +108,8 @@ service cloud.firestore {
     }
 
     match /activityLogs/{entryId} {
-      allow read: if isAdmin();
+      allow get: if isAdmin();
+      allow list: if isAdmin() && boundedList(100);
       allow create: if validActivityShape() && (
         (request.resource.data.action in ['login', 'logout']
           && hasAccess()
@@ -139,7 +146,8 @@ service cloud.firestore {
     }
 
     match /accessInvites/{inviteEmail} {
-      allow read: if isAdmin() || (signedIn() && request.auth.token.email == inviteEmail);
+      allow get: if isAdmin() || (signedIn() && request.auth.token.email == inviteEmail);
+      allow list: if isAdmin() && boundedList(100);
 
       allow create: if isOwner()
         && request.resource.data.keys().hasOnly(['email', 'role', 'status', 'invitedBy', 'invitedByEmail', 'invitedAt', 'updatedAt'])
@@ -184,7 +192,8 @@ service cloud.firestore {
     }
 
     match /members/{memberId} {
-      allow read: if isAdmin() || (signedIn() && request.auth.uid == memberId);
+      allow get: if isAdmin() || (signedIn() && request.auth.uid == memberId);
+      allow list: if isAdmin() && boundedList(100);
 
       allow create: if signedIn()
         && request.auth.uid == memberId
@@ -220,7 +229,8 @@ service cloud.firestore {
     }
 
     match /recordDeletions/{recordId} {
-      allow read: if isAdmin();
+      allow get: if isAdmin();
+      allow list: if isAdmin() && boundedList(100);
       allow create: if isAdmin()
         && request.resource.data.actorId == request.auth.uid
         && request.resource.data.recordId == recordId
@@ -234,7 +244,8 @@ service cloud.firestore {
     }
 
     match /importedRecordStates/{recordId} {
-      allow read: if hasAccess();
+      allow get: if hasAccess();
+      allow list: if hasAccess() && boundedList(100);
       allow create: if isAdmin()
         && request.resource.data.keys().hasOnly(['deleted', 'updatedAt', 'auditId'])
         && request.resource.data.deleted == true
@@ -269,7 +280,8 @@ service cloud.firestore {
           && draft.assetCount >= 0;
       }
 
-      allow read: if isAdmin();
+      allow get: if isAdmin();
+      allow list: if isAdmin() && boundedList(100);
       allow create: if isAdmin()
         && validDraft()
         && request.resource.data.createdBy == request.auth.uid;
@@ -279,7 +291,8 @@ service cloud.firestore {
       allow delete: if isAdmin();
 
       match /assets/{assetId} {
-        allow read: if isAdmin();
+        allow get: if isAdmin();
+        allow list: if isAdmin() && boundedList(100);
         allow create, update: if isAdmin()
           && request.resource.data.keys().hasOnly(['dataUrl', 'sizeBytes', 'updatedAt'])
           && request.resource.data.dataUrl is string
@@ -293,14 +306,16 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if isAdmin() || (hasAccess() && request.auth.uid == userId);
+      allow get: if isAdmin() || (hasAccess() && request.auth.uid == userId);
+      allow list: if isAdmin() && boundedList(100);
       allow create: if hasAccess() && request.auth.uid == userId && request.resource.data.role == 'user';
       allow update: if isAdmin() || (hasAccess() && request.auth.uid == userId && request.resource.data.role == resource.data.role);
       allow delete: if isAdmin();
     }
 
     match /invitations/{invitationId} {
-      allow read, create, update, delete: if isOwner();
+      allow get, create, update, delete: if isOwner();
+      allow list: if isOwner() && boundedList(100);
     }
   }
 }

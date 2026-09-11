@@ -56,16 +56,22 @@ import {
   doc,
   firebaseReady,
   googleSignIn,
+  getDoc,
+  getDocs,
+  limit,
   logActivity,
   onAuthStateChanged,
   onSnapshot,
   orderBy,
   query,
+  startAfter,
   authErrorMessage,
   serverTimestamp,
   signOut,
+  where,
   writeBatch,
   type AccessRole,
+  type QueryDocumentSnapshot,
   type User,
 } from './firebase';
 import { crewOptions, demoLocations } from './demo-data';
@@ -127,6 +133,9 @@ type WorkRecordDraftData = {
 };
 
 const demos = demoLocations as SiteLocation[];
+const LOCATION_PAGE_SIZE = 50;
+const RECORD_PAGE_SIZE = 20;
+const IMPORT_STATE_LIMIT = 100;
 const emptyForm: RecordForm = {
   siteName: '',
   address: '',
@@ -300,8 +309,16 @@ export default function TreeServApp() {
   const [authBusy, setAuthBusy] = useState(true);
   const [authError, setAuthError] = useState('');
   const [view, setView] = useState<View>('map');
-  const [storedLocations, setStoredLocations] = useState<SiteLocation[]>([]);
-  const [records, setRecords] = useState<WorkRecord[]>([]);
+  const [liveLocations, setLiveLocations] = useState<SiteLocation[]>([]);
+  const [olderLocations, setOlderLocations] = useState<SiteLocation[]>([]);
+  const [locationCursor, setLocationCursor] = useState<QueryDocumentSnapshot>();
+  const [hasMoreLocations, setHasMoreLocations] = useState(false);
+  const [locationsLoading, setLocationsLoading] = useState(false);
+  const [liveRecords, setLiveRecords] = useState<WorkRecord[]>([]);
+  const [olderRecords, setOlderRecords] = useState<WorkRecord[]>([]);
+  const [recordCursor, setRecordCursor] = useState<QueryDocumentSnapshot>();
+  const [hasMoreRecords, setHasMoreRecords] = useState(false);
+  const [recordsLoading, setRecordsLoading] = useState(false);
   const [deletedImports, setDeletedImports] = useState<string[]>([]);
   const [activeId, setActiveId] = useState(demos[0]?.id ?? '');
   const [activeRecordId, setActiveRecordId] = useState('');
@@ -323,7 +340,7 @@ export default function TreeServApp() {
   const recordDraftDirty = useRef(false);
   const recordDraftInitialized = useRef(false);
   const lastRecordDraftSignature = useRef('');
-  const recordDraftPayloadRef = useRef<WorkRecordDraftData>();
+  const recordDraftPayloadRef = useRef<WorkRecordDraftData | undefined>(undefined);
   const saveRecordDraftRef = useRef<(mode: 'manual' | 'auto') => Promise<void>>(async () => {});
   const [confirm, setConfirm] = useState<{
     title: string;
@@ -374,48 +391,156 @@ export default function TreeServApp() {
 
   useEffect(() => {
     if (!db || !account || !role) {
-      setStoredLocations([]);
-      setRecords([]);
+      setLiveLocations([]);
+      setOlderLocations([]);
+      setLocationCursor(undefined);
+      setHasMoreLocations(false);
+      setLiveRecords([]);
+      setOlderRecords([]);
+      setRecordCursor(undefined);
+      setHasMoreRecords(false);
       setDeletedImports([]);
       return;
     }
     const stopLocations = onSnapshot(
-      query(collection(db, 'locations'), orderBy('updatedAt', 'desc')),
-      (snapshot) =>
-        setStoredLocations(
+      query(
+        collection(db, 'locations'),
+        orderBy('updatedAt', 'desc'),
+        limit(LOCATION_PAGE_SIZE),
+      ),
+      (snapshot) => {
+        setLiveLocations(
           snapshot.docs.map(
             (item) => ({ id: item.id, ...item.data() }) as SiteLocation,
           ),
-        ),
+        );
+        setLocationCursor(snapshot.docs.at(-1));
+        setHasMoreLocations(snapshot.size === LOCATION_PAGE_SIZE);
+      },
       () => notify('案場同步暫時中斷。'),
     );
-    const stopRecords = onSnapshot(
-      query(collection(db, 'workRecords'), orderBy('createdAt', 'desc')),
-      (snapshot) =>
-        setRecords(
-          snapshot.docs.map(
-            (item) => ({ id: item.id, ...item.data() }) as WorkRecord,
-          ),
-        ),
-      () => notify('工作紀錄同步暫時中斷。'),
-    );
-    const stopDeleted = onSnapshot(
-      collection(db, 'importedRecordStates'),
+    void getDocs(
+      query(collection(db, 'importedRecordStates'), limit(IMPORT_STATE_LIMIT)),
+    ).then(
       (snapshot) =>
         setDeletedImports(
           snapshot.docs
             .filter((item) => item.data().deleted)
             .map((item) => item.id),
         ),
-      () => notify('匯入資料同步暫時中斷。'),
+      () => notify('匯入資料載入失敗。'),
     );
     return () => {
       stopLocations();
-      stopRecords();
-      stopDeleted();
     };
   }, [account?.uid, role]);
 
+  useEffect(() => {
+    setLiveRecords([]);
+    setOlderRecords([]);
+    setRecordCursor(undefined);
+    setHasMoreRecords(false);
+    if (!db || !account || !role || !activeId) return;
+    setRecordsLoading(true);
+    return onSnapshot(
+      query(
+        collection(db, 'workRecords'),
+        where('locationId', '==', activeId),
+        orderBy('createdAt', 'desc'),
+        limit(RECORD_PAGE_SIZE),
+      ),
+      (snapshot) => {
+        setLiveRecords(
+          snapshot.docs.map(
+            (item) => ({ id: item.id, ...item.data() }) as WorkRecord,
+          ),
+        );
+        setRecordCursor(snapshot.docs.at(-1));
+        setHasMoreRecords(snapshot.size === RECORD_PAGE_SIZE);
+        setRecordsLoading(false);
+      },
+      () => {
+        setRecordsLoading(false);
+        notify('工作紀錄同步暫時中斷。');
+      },
+    );
+  }, [account?.uid, role, activeId]);
+
+  async function loadMoreLocations() {
+    if (!db || !locationCursor || locationsLoading) return;
+    setLocationsLoading(true);
+    try {
+      const snapshot = await getDocs(
+        query(
+          collection(db, 'locations'),
+          orderBy('updatedAt', 'desc'),
+          startAfter(locationCursor),
+          limit(LOCATION_PAGE_SIZE),
+        ),
+      );
+      setOlderLocations((current) => {
+        const byId = new Map(current.map((location) => [location.id, location]));
+        snapshot.docs.forEach((item) =>
+          byId.set(item.id, { id: item.id, ...item.data() } as SiteLocation),
+        );
+        return [...byId.values()];
+      });
+      setLocationCursor(snapshot.docs.at(-1));
+      setHasMoreLocations(snapshot.size === LOCATION_PAGE_SIZE);
+    } catch {
+      notify('無法載入更多案場。');
+    } finally {
+      setLocationsLoading(false);
+    }
+  }
+
+  async function loadMoreRecords() {
+    if (!db || !activeId || !recordCursor || recordsLoading) return;
+    setRecordsLoading(true);
+    try {
+      const snapshot = await getDocs(
+        query(
+          collection(db, 'workRecords'),
+          where('locationId', '==', activeId),
+          orderBy('createdAt', 'desc'),
+          startAfter(recordCursor),
+          limit(RECORD_PAGE_SIZE),
+        ),
+      );
+      setOlderRecords((current) => {
+        const byId = new Map(current.map((record) => [record.id, record]));
+        snapshot.docs.forEach((item) =>
+          byId.set(item.id, { id: item.id, ...item.data() } as WorkRecord),
+        );
+        return [...byId.values()];
+      });
+      setRecordCursor(snapshot.docs.at(-1));
+      setHasMoreRecords(snapshot.size === RECORD_PAGE_SIZE);
+    } catch {
+      notify('無法載入更多工作紀錄。');
+    } finally {
+      setRecordsLoading(false);
+    }
+  }
+
+  const records = useMemo(
+    () => [
+      ...liveRecords,
+      ...olderRecords.filter(
+        (older) => !liveRecords.some((live) => live.id === older.id),
+      ),
+    ],
+    [liveRecords, olderRecords],
+  );
+  const storedLocations = useMemo(
+    () => [
+      ...liveLocations,
+      ...olderLocations.filter(
+        (older) => !liveLocations.some((live) => live.id === older.id),
+      ),
+    ],
+    [liveLocations, olderLocations],
+  );
   const locations = useMemo(
     () => [
       ...storedLocations,
@@ -484,12 +609,6 @@ export default function TreeServApp() {
           location.address,
           location.attention,
           ...(location.aliases ?? []),
-          ...location.records!.flatMap((record) => [
-            record.title,
-            record.notes,
-            record.workDetails ?? '',
-            record.safetyNotes ?? '',
-          ]),
         ].join(' '),
       ).includes(needle),
     );
@@ -638,9 +757,22 @@ export default function TreeServApp() {
       );
   }
 
-  function openWorkDraft(draft: DraftDocument<WorkRecordDraftData>) {
+  async function openWorkDraft(draft: DraftDocument<WorkRecordDraftData>) {
     const data = draft.data;
-    const sourceRecord = data.editingId ? records.find((record) => record.id === data.editingId) : undefined;
+    let sourceRecord = data.editingId
+      ? records.find((record) => record.id === data.editingId) ??
+        demos.flatMap((location) => location.records ?? []).find((record) => record.id === data.editingId)
+      : undefined;
+    if (data.editingId && !sourceRecord && db) {
+      const snapshot = await getDoc(doc(db, 'workRecords', data.editingId));
+      if (snapshot.exists())
+        sourceRecord = { id: snapshot.id, ...snapshot.data() } as WorkRecord;
+    }
+    if (data.editingId && !sourceRecord) {
+      notify('找不到這份草稿原本編輯的工作紀錄，可能已被刪除。');
+      return;
+    }
+    if (data.editingLocationId) setActiveId(data.editingLocationId);
     setEditing(sourceRecord);
     setNewSite(Boolean(data.newSite));
     setForm({ ...emptyForm, ...data.form, crew: [...(data.form.crew ?? [])] });
@@ -762,6 +894,12 @@ export default function TreeServApp() {
         ),
       );
       await batch.commit();
+      if (editing) {
+        const applyEdit = (record: WorkRecord) =>
+          record.id === editing.id ? ({ ...record, ...payload } as WorkRecord) : record;
+        setLiveRecords((current) => current.map(applyEdit));
+        setOlderRecords((current) => current.map(applyEdit));
+      }
       if (canManage && recordDraftId) await deleteDraftWithAssets(recordDraftId).catch(() => undefined);
       setRecordOpen(false);
       setRecordDraftId('');
@@ -841,6 +979,16 @@ export default function TreeServApp() {
           auditData(account, 'delete', record.id, record.title),
         );
         await batch.commit();
+        setLiveRecords((current) => current.filter((item) => item.id !== record.id));
+        setOlderRecords((current) => current.filter((item) => item.id !== record.id));
+        if (isImported(record))
+          setDeletedImports((current) =>
+            current.includes(record.id) ? current : [...current, record.id],
+          );
+        if (removeLocation) {
+          setLiveLocations((current) => current.filter((item) => item.id !== record.locationId));
+          setOlderLocations((current) => current.filter((item) => item.id !== record.locationId));
+        }
         if (removeLocation) setActiveId(sortedLocations.find((location) => location.id !== record.locationId)?.id ?? '');
         notify(removeLocation ? '紀錄與空案場地標已刪除。' : '紀錄已刪除。');
       },
@@ -995,7 +1143,7 @@ export default function TreeServApp() {
             size="small"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="搜尋地點、地址或紀錄…"
+            placeholder="搜尋案場名稱、地址或別名…"
             sx={{ flex: 1, maxWidth: 620 }}
             slotProps={{
               input: {
@@ -1148,7 +1296,7 @@ export default function TreeServApp() {
               setView('plan');
             } else {
               setView('map');
-              openWorkDraft(draft as DraftDocument<WorkRecordDraftData>);
+              void openWorkDraft(draft as DraftDocument<WorkRecordDraftData>);
             }
           }}
         />
@@ -1164,7 +1312,7 @@ export default function TreeServApp() {
                 工作地點
               </Typography>
               <Typography variant="h6">
-                {filteredLocations.length} 個案場
+                已載入 {filteredLocations.length} 個案場
               </Typography>
             </Box>
             <Divider />
@@ -1192,12 +1340,22 @@ export default function TreeServApp() {
                 >
                   <ListItemText
                     primary={location.name}
-                    secondary={`${location.records?.length ?? 0} 筆紀錄 · ${locationStatus(location)}`}
+                    secondary={`${location.recordCount ?? location.records?.length ?? '—'} 筆紀錄 · ${locationStatus(location)}`}
                   />
                 </ListItemButton>
               ))}
             </List>
             <Box sx={{ mt: 'auto', p: 2 }}>
+              {hasMoreLocations && !search && (
+                <Button
+                  fullWidth
+                  sx={{ mb: 1.5 }}
+                  disabled={locationsLoading}
+                  onClick={loadMoreLocations}
+                >
+                  {locationsLoading ? '載入中…' : '載入更多案場'}
+                </Button>
+              )}
               <Alert severity="success" icon={<AdminPanelSettingsRounded />}>
                 邀請制已啟用；資料只提供已授權帳號。
               </Alert>
@@ -1233,7 +1391,7 @@ export default function TreeServApp() {
                   sx={{ justifyContent: 'space-between', alignItems: 'center' }}
                 >
                   <Typography sx={{ fontWeight: 750 }}>
-                    {activeRecords.length} 筆工作紀錄
+                    已載入 {activeRecords.length} 筆工作紀錄
                   </Typography>
                   <Button
                     startIcon={<AddRounded />}
@@ -1262,6 +1420,21 @@ export default function TreeServApp() {
                         onClick={() => setActiveRecordId(record.id)}
                       />
                     ))}
+                  </Stack>
+                )}
+                {hasMoreRecords && (
+                  <Button
+                    variant="outlined"
+                    disabled={recordsLoading}
+                    onClick={loadMoreRecords}
+                  >
+                    {recordsLoading ? '載入中…' : '載入更早的工作紀錄'}
+                  </Button>
+                )}
+                {recordsLoading && activeRecords.length === 0 && (
+                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                    <CircularProgress size={18} />
+                    <Typography color="text.secondary">正在載入案場紀錄…</Typography>
                   </Stack>
                 )}
                 {activeRecord ? (
@@ -1474,9 +1647,7 @@ export default function TreeServApp() {
           </Paper>
           <Box className="mui-map-panel">
             <SiteMap
-              locations={sortedLocations.filter(
-                (location) => (location.records?.length ?? 0) > 0,
-              )}
+              locations={sortedLocations}
               activeId={activeId}
               onSelect={(location) => setActiveId(location.id)}
             />

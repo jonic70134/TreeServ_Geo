@@ -4,6 +4,8 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  limit,
+  query,
   serverTimestamp,
   setDoc,
   writeBatch,
@@ -96,7 +98,9 @@ export async function saveDraftAsset(draftId: string, assetId: string, dataUrl: 
 
 export async function loadDraftAssets(draftId: string) {
   if (!db) return new Map<string, string>();
-  const snapshot = await getDocs(collection(db, 'drafts', draftId, 'assets'));
+  const snapshot = await getDocs(
+    query(collection(db, 'drafts', draftId, 'assets'), limit(100)),
+  );
   return new Map(snapshot.docs.map((entry) => [entry.id, String(entry.data().dataUrl || '')]));
 }
 
@@ -107,7 +111,9 @@ export async function removeDraftAsset(draftId: string, assetId: string) {
 
 export async function deleteDraftWithAssets(draftId: string) {
   if (!db) return;
-  const assets = await getDocs(collection(db, 'drafts', draftId, 'assets'));
+  const assets = await getDocs(
+    query(collection(db, 'drafts', draftId, 'assets'), limit(100)),
+  );
   const batch = writeBatch(db);
   assets.docs.forEach((entry) => batch.delete(entry.ref));
   batch.delete(doc(db, 'drafts', draftId));

@@ -33,8 +33,11 @@ import {
   collection,
   db,
   doc,
+  limit,
   normalizeEmail,
   onSnapshot,
+  orderBy,
+  query,
   serverTimestamp,
   writeBatch,
   type AccessRole,
@@ -90,7 +93,7 @@ export default function AccessManagement({
   useEffect(() => {
     if (!db) return;
     const stopInvites = onSnapshot(
-      collection(db, 'accessInvites'),
+      query(collection(db, 'accessInvites'), orderBy('email'), limit(100)),
       (snapshot) =>
         setInvites(
           snapshot.docs.map(
@@ -100,7 +103,7 @@ export default function AccessManagement({
       () => setError('無法載入邀請名單。'),
     );
     const stopMembers = onSnapshot(
-      collection(db, 'members'),
+      query(collection(db, 'members'), orderBy('email'), limit(100)),
       (snapshot) =>
         setMembers(
           snapshot.docs.map(

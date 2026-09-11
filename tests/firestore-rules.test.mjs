@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, writeBatch, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, getDocs, limit, query, updateDoc, deleteDoc, writeBatch, serverTimestamp, Timestamp } from 'firebase/firestore';
 
 let env;
 let owner, admin, member, other, disabled, invitee, guest;
@@ -98,6 +98,13 @@ test('anonymous, uninvited, and disabled accounts cannot read project data', asy
   await assertFails(getDoc(doc(disabled, 'workRecords', 'existing')));
 });
 
+test('collection reads must declare a limit of at most 100 documents', async () => {
+  await assertFails(getDocs(collection(owner, 'workRecords')));
+  await assertFails(getDocs(query(collection(owner, 'workRecords'), limit(101))));
+  await assertSucceeds(getDocs(query(collection(owner, 'workRecords'), limit(100))));
+  await assertSucceeds(getDoc(doc(owner, 'workRecords', 'existing')));
+});
+
 test('pending invite can only be accepted by the matching verified Google account', async () => {
   await assertFails(getDoc(doc(invitee, 'workRecords', 'existing')));
   const batch = writeBatch(invitee);
@@ -165,10 +172,10 @@ test('create stores route and audit in one batch', async () => {
 test('activity logs are admin-readable, append-only, and actor-bound', async () => {
   const ref = doc(collection(member, 'activityLogs'));
   await assertSucceeds(setDoc(ref, entry('member', 'login')));
-  await assertSucceeds(getDocs(collection(owner, 'activityLogs')));
-  await assertSucceeds(getDocs(collection(admin, 'activityLogs')));
-  await assertFails(getDocs(collection(member, 'activityLogs')));
-  await assertFails(getDocs(collection(guest, 'activityLogs')));
+  await assertSucceeds(getDocs(query(collection(owner, 'activityLogs'), limit(100))));
+  await assertSucceeds(getDocs(query(collection(admin, 'activityLogs'), limit(100))));
+  await assertFails(getDocs(query(collection(member, 'activityLogs'), limit(100))));
+  await assertFails(getDocs(query(collection(guest, 'activityLogs'), limit(100))));
   await assertFails(updateDoc(doc(owner, 'activityLogs', ref.id), { action: 'logout' }));
   await assertFails(deleteDoc(doc(owner, 'activityLogs', ref.id)));
   await assertFails(setDoc(doc(collection(member, 'activityLogs')), entry('owner', 'login')));
@@ -192,9 +199,9 @@ test('drafts and draft assets are restricted to owner and administrators', async
   await assertSucceeds(setDoc(doc(owner, 'drafts', 'owner-draft'), draft('owner', 'Owner draft')));
   await assertSucceeds(setDoc(doc(admin, 'drafts', 'admin-draft'), draft('admin', 'Admin draft')));
   await assertFails(setDoc(doc(member, 'drafts', 'member-draft'), draft('member', 'Member draft')));
-  await assertSucceeds(getDocs(collection(owner, 'drafts')));
-  await assertSucceeds(getDocs(collection(admin, 'drafts')));
-  await assertFails(getDocs(collection(member, 'drafts')));
+  await assertSucceeds(getDocs(query(collection(owner, 'drafts'), limit(100))));
+  await assertSucceeds(getDocs(query(collection(admin, 'drafts'), limit(100))));
+  await assertFails(getDocs(query(collection(member, 'drafts'), limit(100))));
   await assertSucceeds(setDoc(doc(owner, 'drafts', 'owner-draft', 'assets', 'cover'), {
     dataUrl: 'data:image/jpeg;base64,abc', sizeBytes: 26, updatedAt: serverTimestamp(),
   }));
@@ -243,7 +250,7 @@ test('owner and admin manage other member roles and status, but admin cannot alt
 
 test('unverified owner email cannot gain owner access', async () => {
   const unverified = env.authenticatedContext('unverified', { email: identity.owner, email_verified: false }).firestore();
-  await assertFails(getDocs(collection(unverified, 'activityLogs')));
+  await assertFails(getDocs(query(collection(unverified, 'activityLogs'), limit(100))));
   await assertFails(getDoc(doc(unverified, 'workRecords', 'existing')));
 });
 
