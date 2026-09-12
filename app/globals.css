@@ -23,7 +23,7 @@ button, input, textarea, select { font: inherit; }
 .mui-workspace {
   height: calc(100vh - 64px);
   display: grid;
-  grid-template-columns: 260px minmax(380px, 520px) minmax(360px, 1fr);
+  grid-template-columns: 190px minmax(0, 1fr) minmax(260px, 22vw);
   grid-template-areas: "places records map";
   min-height: 0;
 }
@@ -145,15 +145,15 @@ button, input, textarea, select { font: inherit; }
 .plan-photo-placeholder { color: #9a9a9a; font-size: 18px; }
 
 @media (max-width: 1120px) {
-  .mui-workspace { grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: minmax(360px, 58%) minmax(260px, 42%); grid-template-areas: "places records" "places map"; }
+  .mui-workspace { grid-template-columns: 210px minmax(0, 1fr); grid-template-rows: minmax(460px, 70%) minmax(220px, 30%); grid-template-areas: "places records" "places map"; }
 }
 @media (max-width: 700px) {
-  .mui-workspace { height: auto; min-height: calc(100vh - 112px); grid-template-columns: 1fr; grid-template-rows: auto auto 52vh; grid-template-areas: "places" "records" "map"; }
+  .mui-workspace { height: auto; min-height: calc(100vh - 112px); grid-template-columns: 1fr; grid-template-rows: auto auto 34vh; grid-template-areas: "places" "records" "map"; }
   .mui-place-list { max-height: none; border-width: 0 0 1px !important; }
   .mobile-site-select { display: block; }
   .desktop-site-list { display: none; }
   .mui-record-panel { padding: 16px; border-width: 0 0 1px !important; }
-  .mui-map-panel { min-height: 52vh; }
+  .mui-map-panel { min-height: 34vh; }
   .mui-image-grid { grid-template-columns: 1fr; }
   .mui-image-grid img { height: 220px; }
   .route-map { height: 300px; }

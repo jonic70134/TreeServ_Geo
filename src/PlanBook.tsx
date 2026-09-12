@@ -19,6 +19,7 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { connectGoogleDrive, ensureProjectFolder, uploadDriveFile, type DriveItem } from './google-drive';
 import { logActivity, type User } from './firebase';
+import type { SiteLocation, WorkRecord } from './types';
 import {
   estimateBytes,
   loadDraftAssets,
@@ -40,6 +41,10 @@ export type PlanDraftData = {
   cover: Omit<CoverData, 'coverPhoto'> & { hasCoverPhoto?: boolean };
   items: Array<Omit<TreePlan, 'photos'> & { photos: Array<Pick<PlanPhoto, 'id' | 'name' | 'caption' | 'driveLink'> & { hasAsset?: boolean }> }>;
   folderName: string;
+  locationId?: string;
+  workRecordId?: string;
+  pdfLink?: string;
+  completedAt?: string;
 };
 
 const toolLabels: Record<Tool, string> = { brush: '畫筆', arc: '弧線', arrow: '箭頭', circle: '圈選' };
@@ -66,17 +71,24 @@ export default function PlanBook({
   account,
   onBack,
   initialDraft,
+  locations,
+  records,
+  initialLocationId,
 }: {
   account: User;
   onBack: () => void;
   initialDraft?: DraftDocument<PlanDraftData>;
+  locations: SiteLocation[];
+  records: WorkRecord[];
+  initialLocationId?: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const imageCache = useRef(new Map<string, HTMLImageElement>());
   const activeMark = useRef<Mark | undefined>(undefined);
+  const initialLocation = locations.find((location) => location.id === (initialDraft?.data.locationId || initialLocationId));
   const defaultCover: CoverData = {
-    areaName: '', siteName: '', title: '樹木修剪計畫書', description: '', surveyDate: today,
+    areaName: '', siteName: initialLocation?.name ?? '', title: '樹木修剪計畫書', description: '', surveyDate: today,
     evaluator: '職人樹藝有限公司', coverPhoto: '',
   };
   const [cover, setCover] = useState<CoverData>({ ...defaultCover, ...(initialDraft?.data.cover ?? {}), coverPhoto: '' });
@@ -99,7 +111,10 @@ export default function PlanBook({
   const [driveToken, setDriveToken] = useState('');
   const [driveFolder, setDriveFolder] = useState<DriveItem>();
   const [folderName, setFolderName] = useState(initialDraft?.data.folderName || `TreeServ Geo 計畫書 ${today.slice(0, 7)}`);
-  const [pdfLink, setPdfLink] = useState('');
+  const [locationId, setLocationId] = useState(initialDraft?.data.locationId || initialLocationId || '');
+  const [workRecordId, setWorkRecordId] = useState(initialDraft?.data.workRecordId || '');
+  const [pdfLink, setPdfLink] = useState(initialDraft?.data.pdfLink || '');
+  const [completedAt, setCompletedAt] = useState(initialDraft?.data.completedAt || '');
   const [downloadUrl, setDownloadUrl] = useState('');
   const [downloadName, setDownloadName] = useState('');
   const [busy, setBusy] = useState('');
@@ -150,7 +165,11 @@ export default function PlanBook({
       })),
     })),
     folderName,
-  }), [cover, coverHasAsset, items, folderName]);
+    locationId,
+    workRecordId,
+    pdfLink,
+    completedAt,
+  }), [cover, coverHasAsset, items, folderName, locationId, workRecordId, pdfLink, completedAt]);
   const draftSignature = useMemo(() => JSON.stringify(draftData), [draftData]);
 
   const notify = (value: string) => {
@@ -473,10 +492,27 @@ export default function PlanBook({
       if (downloadUrl) URL.revokeObjectURL(downloadUrl);
       const url = URL.createObjectURL(blob); setDownloadUrl(url); setDownloadName(filename);
       const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click();
+      let savedPdfLink = '';
       if (driveToken || driveFolder) {
         const { token, folder } = await ensureConnection(); const result = await uploadDriveFile(token, folder.id, filename, blob);
-        setPdfLink(result.webViewLink ?? `https://drive.google.com/open?id=${result.id}`);
+        savedPdfLink = result.webViewLink ?? `https://drive.google.com/open?id=${result.id}`;
+        setPdfLink(savedPdfLink);
       }
+      const finishedAt = new Date().toISOString();
+      setCompletedAt(finishedAt);
+      await savePlanDraft('manual');
+      await saveDraft({
+        id: draftId,
+        kind: 'pruning_plan',
+        title: [cover.areaName, cover.siteName, cover.title].filter(Boolean).join(' ') || '未命名修剪計畫書',
+        data: { ...draftData, pdfLink: savedPdfLink || pdfLink, completedAt: finishedAt },
+        account,
+        mode: 'manual',
+        createdBy: initialDraft?.createdBy,
+        createdByName: initialDraft?.createdByName,
+        assetCount: draftData.items.flatMap((item) => item.photos).filter((photo) => photo.hasAsset).length + (draftData.cover.hasCoverPhoto ? 1 : 0),
+        assetBytes: [...assetBytes.current.values()].reduce((sum, bytes) => sum + bytes, 0),
+      });
       await logActivity(account, 'plan_pdf_save', '', cover.siteName || cover.title);
       notify(driveToken || driveFolder ? 'PDF 已下載，並儲存到 Google Drive。' : 'PDF 已產生並下載。');
     } catch (error) { notify(error instanceof Error ? error.message : '計畫書產生失敗。'); }
@@ -545,6 +581,19 @@ export default function PlanBook({
       <Paper variant="outlined" className="plan-form-section">
         <Box className="plan-section-heading"><div><Typography variant="overline">第 1 頁</Typography><Typography variant="h6">封面與計畫說明</Typography></div><Typography color="text.secondary">欄位順序依範本編排</Typography></Box>
         <Box className="plan-cover-fields">
+          <TextField select required label="關聯案場" value={locationId} onChange={(event) => {
+            const nextId = event.target.value;
+            const location = locations.find((item) => item.id === nextId);
+            setLocationId(nextId);
+            setWorkRecordId('');
+            if (location) setCoverField('siteName', location.name);
+          }}>
+            {locations.map((location) => <MenuItem key={location.id} value={location.id}>{location.name}</MenuItem>)}
+          </TextField>
+          <TextField select label="關聯工作紀錄（選填）" value={workRecordId} onChange={(event) => setWorkRecordId(event.target.value)} disabled={!locationId}>
+            <MenuItem value="">不指定單筆紀錄</MenuItem>
+            {records.filter((record) => record.locationId === locationId).map((record) => <MenuItem key={record.id} value={record.id}>{record.title}</MenuItem>)}
+          </TextField>
           <TextField label="縣市／行政區" placeholder="例如：桃園市蘆竹區" value={cover.areaName} onChange={(event) => setCoverField('areaName', event.target.value)} />
           <TextField required label="案場／單位名稱" placeholder="例如：龍安國民小學" value={cover.siteName} onChange={(event) => setCoverField('siteName', event.target.value)} />
           <TextField required label="文件名稱" value={cover.title} onChange={(event) => setCoverField('title', event.target.value)} />

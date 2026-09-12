@@ -28,16 +28,29 @@ function slotsOverlap(left: WorkScheduleSlot = '全天', right: WorkScheduleSlot
   return left === '全天' || right === '全天' || left === right;
 }
 
+function slotOnDay(record: WorkRecord, day: number, range: { start: number; end: number }) {
+  if (range.start === range.end) {
+    const start = record.startDaySlot ?? record.scheduleSlot ?? '全天';
+    const end = record.endDaySlot ?? record.scheduleSlot ?? start;
+    return start === end ? start : '全天';
+  }
+  if (day === range.start) return record.startDaySlot ?? record.scheduleSlot ?? '全天';
+  if (day === range.end) return record.endDaySlot ?? record.scheduleSlot ?? '全天';
+  return '全天';
+}
+
 export function recordsOverlap(left: WorkRecord, right: WorkRecord) {
   const leftRange = recordDayRange(left);
   const rightRange = recordDayRange(right);
   if (!leftRange || !rightRange || leftRange.end < rightRange.start || rightRange.end < leftRange.start)
     return false;
-  const sameSingleDay =
-    leftRange.start === leftRange.end &&
-    rightRange.start === rightRange.end &&
-    leftRange.start === rightRange.start;
-  return !sameSingleDay || slotsOverlap(left.scheduleSlot, right.scheduleSlot);
+  const overlapStart = Math.max(leftRange.start, rightRange.start);
+  const overlapEnd = Math.min(leftRange.end, rightRange.end);
+  if (overlapStart < overlapEnd) return true;
+  return slotsOverlap(
+    slotOnDay(left, overlapStart, leftRange),
+    slotOnDay(right, overlapStart, rightRange),
+  );
 }
 
 export function recordPersonnel(record: WorkRecord): PersonnelAssignment[] {

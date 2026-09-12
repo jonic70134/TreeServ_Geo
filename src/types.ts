@@ -86,6 +86,8 @@ export type WorkRecord = {
   crewAssignments?: PersonnelAssignment[];
   scheduleStatus?: WorkScheduleStatus;
   scheduleSlot?: WorkScheduleSlot;
+  startDaySlot?: WorkScheduleSlot;
+  endDaySlot?: WorkScheduleSlot;
   estimatedDays?: number;
   workTypes?: EquipmentPackage[];
   equipmentItems?: WorkEquipmentItem[];
@@ -105,6 +107,13 @@ export type WorkRecord = {
   roadPermit?: string;
   equipment?: string;
   safetyNotes?: string;
+};
+
+export type CompletedPlan = {
+  locationId?: string;
+  workRecordId?: string;
+  pdfLink?: string;
+  completedAt?: string;
 };
 
 export type SiteLocation = {

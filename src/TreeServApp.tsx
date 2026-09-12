@@ -78,6 +78,7 @@ import {
   type User,
 } from './firebase';
 import { demoLocations } from './demo-data';
+import { generatedDemoLocations } from './generated-demo-data';
 import {
   equipmentPackageLabels,
   workRoleLabels,
@@ -110,7 +111,7 @@ import {
   type DraftDocument,
 } from './drafts';
 
-type View = 'map' | 'access' | 'logs' | 'plan' | 'drafts' | 'resources' | 'dispatch';
+type View = 'map' | 'access' | 'logs' | 'plan' | 'plans' | 'drafts' | 'resources' | 'dispatch';
 type RecordForm = {
   siteName: string;
   address: string;
@@ -125,7 +126,8 @@ type RecordForm = {
   crewAssignments: PersonnelAssignment[];
   scheduleStatus: WorkScheduleStatus;
   scheduleSlot: WorkScheduleSlot;
-  estimatedDays: string;
+  startDaySlot: WorkScheduleSlot;
+  endDaySlot: WorkScheduleSlot;
   workTypes: EquipmentPackage[];
   equipmentItems: WorkEquipmentItem[];
   meetingTime: string;
@@ -160,7 +162,7 @@ type WorkRecordDraftData = {
   editingLocationId?: string;
 };
 
-const demos = demoLocations as SiteLocation[];
+const demos = [...demoLocations, ...generatedDemoLocations] as SiteLocation[];
 const LOCATION_PAGE_SIZE = 50;
 const RECORD_PAGE_SIZE = 20;
 const IMPORT_STATE_LIMIT = 100;
@@ -179,7 +181,8 @@ const emptyForm: RecordForm = {
   crewAssignments: [],
   scheduleStatus: '待排程',
   scheduleSlot: '全天',
-  estimatedDays: '1',
+  startDaySlot: '全天',
+  endDaySlot: '全天',
   workTypes: [],
   equipmentItems: [],
   meetingTime: '07:30',
@@ -220,6 +223,36 @@ const youtubeId = (url: string) =>
   url.match(
     /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([\w-]{11})/,
   )?.[1] ?? '';
+
+const meetingTimeOptions = Array.from({ length: 61 }, (_item, index) => {
+  const totalMinutes = 5 * 60 + index * 15;
+  return `${String(Math.floor(totalMinutes / 60)).padStart(2, '0')}:${String(totalMinutes % 60).padStart(2, '0')}`;
+});
+const displayMeetingTime = (value?: string) => value?.match(/\b(?:0[5-9]|1\d|20):[0-5]\d\b/)?.[0] ?? '';
+
+const weatherLabels: Record<number, string> = {
+  0: '晴朗', 1: '晴時多雲', 2: '多雲', 3: '陰天', 45: '有霧', 48: '霧淞',
+  51: '毛毛雨', 53: '毛毛雨', 55: '較強毛毛雨', 61: '小雨', 63: '中雨', 65: '大雨',
+  80: '短暫陣雨', 81: '陣雨', 82: '強陣雨', 95: '雷雨', 96: '雷雨伴冰雹', 99: '強雷雨伴冰雹',
+};
+
+async function weatherForDate(lat: number, lng: number, date: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return '';
+  const today = localIsoDate();
+  const endpoint = date < today ? 'https://archive-api.open-meteo.com/v1/archive' : 'https://api.open-meteo.com/v1/forecast';
+  const params = new URLSearchParams({
+    latitude: String(lat), longitude: String(lng), start_date: date, end_date: date,
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max',
+    timezone: 'Asia/Taipei',
+  });
+  const response = await fetch(`${endpoint}?${params}`);
+  if (!response.ok) throw new Error('weather-unavailable');
+  const result = await response.json() as { daily?: { weather_code?: number[]; temperature_2m_max?: number[]; temperature_2m_min?: number[]; precipitation_sum?: number[]; wind_speed_10m_max?: number[] } };
+  const daily = result.daily;
+  if (!daily?.weather_code?.length) throw new Error('weather-unavailable');
+  const code = daily.weather_code[0];
+  return `${weatherLabels[code] ?? '天氣待確認'}，${Math.round(daily.temperature_2m_min?.[0] ?? 0)}–${Math.round(daily.temperature_2m_max?.[0] ?? 0)}°C，降雨 ${daily.precipitation_sum?.[0] ?? 0} mm，最大風速 ${Math.round(daily.wind_speed_10m_max?.[0] ?? 0)} km/h`;
+}
 
 function parseRecordDate(value?: string) {
   if (!value) return undefined;
@@ -298,7 +331,7 @@ function calendarUrl(location: SiteLocation, record: WorkRecord) {
     `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
   const details = [
     record.notes,
-    record.meetingTime && `集合時間：${record.meetingTime}`,
+    displayMeetingTime(record.meetingTime) && `集合時間：${displayMeetingTime(record.meetingTime)}`,
     record.meetingPlace && `集合地點：${record.meetingPlace}`,
     record.mapUrl,
   ]
@@ -358,6 +391,7 @@ export default function TreeServApp() {
   const [scheduledRecords, setScheduledRecords] = useState<WorkRecord[]>([]);
   const [personnel, setPersonnel] = useState<Personnel[]>([]);
   const [equipmentCatalog, setEquipmentCatalog] = useState<EquipmentCatalogItem[]>([]);
+  const [plans, setPlans] = useState<DraftDocument<PlanDraftData>[]>([]);
   const [deletedImports, setDeletedImports] = useState<string[]>([]);
   const [activeId, setActiveId] = useState(demos[0]?.id ?? '');
   const [activeRecordId, setActiveRecordId] = useState('');
@@ -372,6 +406,7 @@ export default function TreeServApp() {
   const [routePoints, setRoutePoints] = useState<RoutePoint[]>([]);
   const [routeNotes, setRouteNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [weatherLoading, setWeatherLoading] = useState(false);
   const [toast, setToast] = useState('');
   const [planDraft, setPlanDraft] = useState<DraftDocument<PlanDraftData>>();
   const [recordDraftId, setRecordDraftId] = useState('');
@@ -443,6 +478,7 @@ export default function TreeServApp() {
       setScheduledRecords([]);
       setPersonnel([]);
       setEquipmentCatalog([]);
+      setPlans([]);
       setDeletedImports([]);
       return;
     }
@@ -478,6 +514,13 @@ export default function TreeServApp() {
       (snapshot) => setScheduledRecords(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as WorkRecord)),
       () => notify('派工總覽同步暫時中斷。'),
     );
+    const stopPlans = (role === 'owner' || role === 'admin') ? onSnapshot(
+      query(collection(db, 'drafts'), orderBy('updatedAt', 'desc'), limit(50)),
+      (snapshot) => setPlans(snapshot.docs
+        .map((item) => ({ id: item.id, ...item.data() }) as DraftDocument<PlanDraftData>)
+        .filter((draft) => draft.kind === 'pruning_plan')),
+      () => notify('計畫書列表同步暫時中斷。'),
+    ) : () => undefined;
     void getDocs(
       query(collection(db, 'importedRecordStates'), limit(IMPORT_STATE_LIMIT)),
     ).then(
@@ -494,6 +537,7 @@ export default function TreeServApp() {
       stopPersonnel();
       stopEquipment();
       stopSchedule();
+      stopPlans();
     };
   }, [account, role]);
 
@@ -655,6 +699,32 @@ export default function TreeServApp() {
   const activeRecord =
     activeRecords.find((record) => record.id === activeRecordId) ??
     activeRecords[0];
+  const activePlans = plans.filter((plan) =>
+    plan.data.locationId === activeLocation?.id &&
+    (!plan.data.workRecordId || plan.data.workRecordId === activeRecord?.id),
+  );
+
+  useEffect(() => {
+    if (!recordOpen || !form.workDate) {
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setWeatherLoading(true);
+      try {
+        const point = newSite && form.address.trim()
+          ? await geocodeAddress(form.address.trim())
+          : { lat: form.lat, lng: form.lng };
+        const weather = await weatherForDate(point.lat, point.lng, form.workDate);
+        if (!cancelled) setForm((current) => ({ ...current, weather }));
+      } catch {
+        if (!cancelled) setForm((current) => ({ ...current, weather: '目前無法取得自動天氣，儲存時會再嘗試。' }));
+      } finally {
+        if (!cancelled) setWeatherLoading(false);
+      }
+    }, 700);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [recordOpen, newSite, form.address, form.lat, form.lng, form.workDate]);
 
   const filteredLocations = useMemo(() => {
     const needle = normalizeSearch(search);
@@ -699,7 +769,7 @@ export default function TreeServApp() {
       title: form.title, notes: form.notes, imageUrls: [], youtubeUrls: [], fileUrls: [],
       workDate: form.workDate, endDate: form.endDate, siteLead: form.siteLead,
       crewAssignments: form.crewAssignments, scheduleStatus: form.scheduleStatus,
-      scheduleSlot: form.scheduleSlot, estimatedDays: Number(form.estimatedDays) || 1,
+      scheduleSlot: form.workDate === form.endDate && form.startDaySlot === form.endDaySlot ? form.startDaySlot : '全天', startDaySlot: form.startDaySlot, endDaySlot: form.endDaySlot,
     },
     scheduledRecords,
   );
@@ -742,7 +812,7 @@ export default function TreeServApp() {
         ...defaults.filter((item) => !current.equipmentItems.some((selected) => selected.catalogId === item.catalogId)),
       ],
     }));
-    notify(defaults.length ? '已帶入所選作業的預設公裝，可繼續調整數量。' : '目前沒有符合的預設公裝，請先至人員與公裝主檔設定。');
+    notify(defaults.length ? '已帶入所選作業的預設公裝，可繼續調整數量。' : '目前沒有符合的預設公裝，請先至工作夥伴及公裝清單設定。');
   }
   const recordDraftPayload = useMemo<WorkRecordDraftData>(() => ({
     form,
@@ -855,7 +925,9 @@ export default function TreeServApp() {
       crewAssignments: (record.crewAssignments ?? []).map((item) => ({ ...item })),
       equipmentItems: (record.equipmentItems ?? []).map((item) => ({ ...item })),
       workTypes: [...(record.workTypes ?? [])],
-      estimatedDays: String(record.estimatedDays ?? 1),
+      meetingTime: displayMeetingTime(record.meetingTime) || '07:30',
+      startDaySlot: record.startDaySlot ?? record.scheduleSlot ?? '全天',
+      endDaySlot: record.endDaySlot ?? record.scheduleSlot ?? '全天',
       imageUrls: (record.imageUrls ?? []).join('\n'),
       youtubeUrls: (record.youtubeUrls ?? []).join('\n'),
       fileUrls: (record.fileUrls ?? []).join('\n'),
@@ -899,6 +971,9 @@ export default function TreeServApp() {
       crewAssignments: (data.form.crewAssignments ?? []).map((item) => ({ ...item })),
       equipmentItems: (data.form.equipmentItems ?? []).map((item) => ({ ...item })),
       workTypes: [...(data.form.workTypes ?? [])],
+      meetingTime: displayMeetingTime(data.form.meetingTime) || '07:30',
+      startDaySlot: data.form.startDaySlot ?? data.form.scheduleSlot ?? '全天',
+      endDaySlot: data.form.endDaySlot ?? data.form.scheduleSlot ?? '全天',
     });
     setRoutePoints((data.routePoints ?? []).map((point) => ({ ...point })));
     setRouteNotes(data.routeNotes ?? '');
@@ -932,6 +1007,14 @@ export default function TreeServApp() {
       notify('施工結束日期不可早於起始日期。');
       return;
     }
+    if (form.workDate && form.endDate === form.workDate && form.startDaySlot === '下午' && form.endDaySlot === '上午') {
+      notify('同一天施工時，結束時段不可早於起始時段。');
+      return;
+    }
+    if (!meetingTimeOptions.includes(form.meetingTime)) {
+      notify('集合時間請從 05:00–20:00 的 15 分鐘區間中選擇。');
+      return;
+    }
     if (['已排程', '進行中'].includes(form.scheduleStatus) && !form.workDate) {
       notify('已排程或進行中的紀錄必須填寫施工起始日期。');
       return;
@@ -951,8 +1034,12 @@ export default function TreeServApp() {
       const recordId = editing?.id ?? doc(collection(db, 'workRecords')).id;
       let locationId = editing?.locationId ?? activeLocation?.id;
       if (!editing && newSite && mergeLocationId) locationId = mergeLocationId;
+      const linkedLocation = sortedLocations.find((location) => location.id === locationId);
+      let recordPoint = { lat: form.lat, lng: form.lng };
+      if (linkedLocation) recordPoint = { lat: linkedLocation.lat, lng: linkedLocation.lng };
       if (!editing && newSite && !mergeLocationId) {
         const point = await geocodeAddress(form.address.trim());
+        recordPoint = point;
         const locationRef = doc(collection(db, 'locations'));
         locationId = locationRef.id;
         batch.set(locationRef, {
@@ -967,6 +1054,9 @@ export default function TreeServApp() {
           updatedAt: serverTimestamp(),
         });
       }
+      const automaticWeather = form.workDate
+        ? await weatherForDate(recordPoint.lat, recordPoint.lng, form.workDate).catch(() => form.weather)
+        : '';
       const payload = {
         title: form.title.trim(),
         notes: form.notes.trim(),
@@ -976,8 +1066,9 @@ export default function TreeServApp() {
         siteLead: form.siteLead ?? null,
         crewAssignments: form.crewAssignments,
         scheduleStatus: form.scheduleStatus,
-        scheduleSlot: form.scheduleSlot,
-        estimatedDays: Math.max(0.5, Number(form.estimatedDays) || 1),
+        scheduleSlot: form.workDate === form.endDate && form.startDaySlot === form.endDaySlot ? form.startDaySlot : '全天',
+        startDaySlot: form.startDaySlot,
+        endDaySlot: form.endDaySlot,
         workTypes: form.workTypes,
         equipmentItems: form.equipmentItems
           .filter((item) => item.name.trim())
@@ -985,7 +1076,7 @@ export default function TreeServApp() {
         meetingTime: form.meetingTime.trim(),
         meetingPlace: form.meetingPlace.trim(),
         mapUrl: form.mapUrl.trim(),
-        weather: form.weather.trim(),
+        weather: automaticWeather.trim(),
         hospitalName: form.hospitalName.trim(),
         hospitalPhone: form.hospitalPhone.trim(),
         hospitalDistance: form.hospitalDistance.trim(),
@@ -1261,17 +1352,20 @@ export default function TreeServApp() {
       </Box>
     );
   if (view === 'plan' && canManage)
-    return <PlanBook account={account} initialDraft={planDraft} onBack={() => { setPlanDraft(undefined); setView('map'); }} />;
+    return <PlanBook
+      account={account}
+      initialDraft={planDraft}
+      locations={sortedLocations}
+      records={sortedLocations.flatMap((location) => location.records ?? [])}
+      initialLocationId={activeLocation?.id}
+      onBack={() => { setPlanDraft(undefined); setView('map'); }}
+    />;
 
   const labels: Array<[keyof RecordForm, string, boolean?]> = [
     ['title', '紀錄標題'],
     ['notes', '工作內容', true],
-    ['workDate', '施工起始日期'],
-    ['endDate', '施工結束日期'],
-    ['meetingTime', '集合時間'],
     ['meetingPlace', '集合地點'],
     ['mapUrl', '地圖連結'],
-    ['weather', '天氣'],
     ['hospitalName', '鄰近醫院'],
     ['hospitalPhone', '醫院電話'],
     ['hospitalDistance', '醫院距離'],
@@ -1407,6 +1501,12 @@ export default function TreeServApp() {
           <AddRounded sx={{ mr: 1.5 }} />
           建立案場紀錄
         </MenuItem>
+        {activeLocation && (
+          <MenuItem onClick={() => { openCreate(true); setMenuAnchor(undefined); }}>
+            <AddRounded sx={{ mr: 1.5 }} />
+            建立工作紀錄
+          </MenuItem>
+        )}
         <MenuItem
           onClick={() => {
             setView('map');
@@ -1435,7 +1535,18 @@ export default function TreeServApp() {
             }}
           >
             <GroupsRounded sx={{ mr: 1.5 }} />
-            人員與公裝主檔
+            工作夥伴及公裝清單
+          </MenuItem>
+        )}
+        {canManage && (
+          <MenuItem
+            onClick={() => {
+              setView('plans');
+              setMenuAnchor(undefined);
+            }}
+          >
+            <DescriptionRounded sx={{ mr: 1.5 }} />
+            計畫書列表
           </MenuItem>
         )}
         {canManage && (
@@ -1501,6 +1612,15 @@ export default function TreeServApp() {
               setView('map');
               void openWorkDraft(draft as DraftDocument<WorkRecordDraftData>);
             }
+          }}
+        />
+      ) : view === 'plans' && canManage ? (
+        <DraftList
+          kind="pruning_plan"
+          notify={notify}
+          onOpen={(draft) => {
+            setPlanDraft(draft as DraftDocument<PlanDraftData>);
+            setView('plan');
           }}
         />
       ) : view === 'resources' && canManage ? (
@@ -1622,7 +1742,7 @@ export default function TreeServApp() {
                     spacing={1}
                     sx={{ overflowX: 'auto', pb: 0.5 }}
                   >
-                    {activeRecords.map((record, index) => (
+                    {activeRecords.map((record) => (
                       <Chip
                         key={record.id}
                         clickable
@@ -1631,7 +1751,7 @@ export default function TreeServApp() {
                         }
                         label={
                           fullDate(record.workDate || record.dateLabel) ||
-                          `第 ${index + 1} 天`
+                          '日期未設定'
                         }
                         onClick={() => setActiveRecordId(record.id)}
                       />
@@ -1661,8 +1781,9 @@ export default function TreeServApp() {
                           {fullDate(
                             activeRecord.workDate || activeRecord.dateLabel,
                           ) || '最近更新'}
+                          {activeRecord.workDate ? `（${activeRecord.startDaySlot ?? activeRecord.scheduleSlot ?? '全天'}）` : ''}
                           {activeRecord.endDate
-                            ? ` 至 ${fullDate(activeRecord.endDate)}`
+                            ? ` 至 ${fullDate(activeRecord.endDate)}（${activeRecord.endDaySlot ?? activeRecord.scheduleSlot ?? '全天'}）`
                             : ''}
                         </Typography>
                         <Typography variant="h6">
@@ -1670,7 +1791,6 @@ export default function TreeServApp() {
                         </Typography>
                         <Stack direction="row" sx={{ gap: 1, flexWrap: 'wrap', mt: 0.75 }}>
                           {activeRecord.scheduleStatus && <Chip size="small" color={activeRecord.scheduleStatus === '取消' ? 'default' : 'primary'} label={activeRecord.scheduleStatus} />}
-                          {activeRecord.estimatedDays && <Chip size="small" variant="outlined" label={`預估 ${activeRecord.estimatedDays} 天 · ${activeRecord.scheduleSlot ?? '全天'}`} />}
                         </Stack>
                         <Typography sx={{ whiteSpace: 'pre-wrap' }}>
                           <LinkifiedText>{activeRecord.notes}</LinkifiedText>
@@ -1706,6 +1826,32 @@ export default function TreeServApp() {
                               案場地圖
                             </Button>
                           )}
+                          {activePlans.map((plan) => plan.data.pdfLink ? (
+                            <Button
+                              key={plan.id}
+                              component="a"
+                              href={plan.data.pdfLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              size="small"
+                              color="secondary"
+                              variant="contained"
+                              startIcon={<DescriptionRounded />}
+                            >
+                              查看計畫書
+                            </Button>
+                          ) : (
+                            <Button
+                              key={plan.id}
+                              size="small"
+                              color="secondary"
+                              variant="contained"
+                              startIcon={<DescriptionRounded />}
+                              onClick={() => { setPlanDraft(plan); setView('plan'); }}
+                            >
+                              查看計畫書
+                            </Button>
+                          ))}
                         </Stack>
                       </Box>
                       {activeRecord.safetyNotes && (
@@ -1736,7 +1882,7 @@ export default function TreeServApp() {
                       {[
                         [
                           '集合',
-                          [activeRecord.meetingTime, activeRecord.meetingPlace]
+                          [displayMeetingTime(activeRecord.meetingTime), activeRecord.meetingPlace]
                             .filter(Boolean)
                             .join('　'),
                         ],
@@ -1980,10 +2126,24 @@ export default function TreeServApp() {
               <TextField select fullWidth label="派工狀態" value={form.scheduleStatus} onChange={(event) => setForm((current) => ({ ...current, scheduleStatus: event.target.value as WorkScheduleStatus }))}>
                 {(['待排程', '已排程', '進行中', '已完成', '取消'] as WorkScheduleStatus[]).map((status) => <MenuItem key={status} value={status}>{status}</MenuItem>)}
               </TextField>
-              <TextField select fullWidth label="作業時段" value={form.scheduleSlot} onChange={(event) => setForm((current) => ({ ...current, scheduleSlot: event.target.value as WorkScheduleSlot }))}>
+            </Stack>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <TextField required fullWidth type="date" label="施工起始日期" value={form.workDate} onChange={setField('workDate')} slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: form.endDate || undefined } }} />
+              <TextField select fullWidth label="起始日作業時段" value={form.startDaySlot} onChange={(event) => setForm((current) => ({ ...current, startDaySlot: event.target.value as WorkScheduleSlot }))}>
                 {(['全天', '上午', '下午'] as WorkScheduleSlot[]).map((slot) => <MenuItem key={slot} value={slot}>{slot}</MenuItem>)}
               </TextField>
-              <TextField fullWidth type="number" label="預估工時（天）" value={form.estimatedDays} onChange={setField('estimatedDays')} slotProps={{ htmlInput: { min: 0.5, step: 0.5 }, inputLabel: { shrink: true } }} />
+            </Stack>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <TextField fullWidth type="date" label="施工結束日期" value={form.endDate} onChange={setField('endDate')} slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: form.workDate || undefined } }} />
+              <TextField select fullWidth label="結束日作業時段" value={form.endDaySlot} onChange={(event) => setForm((current) => ({ ...current, endDaySlot: event.target.value as WorkScheduleSlot }))}>
+                {(['全天', '上午', '下午'] as WorkScheduleSlot[]).map((slot) => <MenuItem key={slot} value={slot}>{slot}</MenuItem>)}
+              </TextField>
+            </Stack>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <TextField select required fullWidth label="集合時間" value={form.meetingTime} onChange={setField('meetingTime')} helperText="可選 05:00–20:00，每 15 分鐘一格">
+                {meetingTimeOptions.map((time) => <MenuItem key={time} value={time}>{time}</MenuItem>)}
+              </TextField>
+              <TextField fullWidth label="天氣（自動帶入）" value={weatherLoading ? '正在依施工日期與案場位置查詢…' : form.weather} slotProps={{ input: { readOnly: true } }} helperText="天氣由施工起始日與案場座標自動查詢，不需手動填寫。" />
             </Stack>
             <Box>
               <Typography variant="subtitle1" sx={{ fontWeight: 750, mb: 1 }}>案場負責人</Typography>
@@ -1998,22 +2158,11 @@ export default function TreeServApp() {
                 key={key}
                 required={key === 'title' || key === 'notes'}
                 label={label}
-                type={key === 'workDate' || key === 'endDate' ? 'date' : 'text'}
+                type="text"
                 multiline={multiline}
                 minRows={multiline ? 3 : undefined}
                 value={form[key] as string}
                 onChange={setField(key)}
-                slotProps={
-                  key === 'workDate' || key === 'endDate'
-                    ? {
-                        inputLabel: { shrink: true },
-                        htmlInput:
-                          key === 'workDate'
-                            ? { min: localIsoDate(), max: form.endDate || undefined }
-                            : { min: form.workDate && form.workDate > localIsoDate() ? form.workDate : localIsoDate() },
-                      }
-                    : undefined
-                }
               />
             ))}
             <Box>

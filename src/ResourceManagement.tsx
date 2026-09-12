@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -39,8 +39,11 @@ import {
   type EquipmentCatalogItem,
   type EquipmentPackage,
   type Personnel,
+  type SiteLocation,
   type WorkRole,
 } from './types';
+import { demoLocations } from './demo-data';
+import { generatedDemoLocations } from './generated-demo-data';
 
 type Props = { account: User; notify: (message: string) => void };
 type PersonnelForm = Omit<Personnel, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>;
@@ -52,6 +55,51 @@ const emptyPersonnel: PersonnelForm = {
 const emptyEquipment: EquipmentForm = {
   name: '', unit: '組', defaultQuantity: 1, packages: ['general'], note: '', status: 'active',
 };
+
+const defaultPersonnelNames = [...new Set(
+  ([...demoLocations, ...generatedDemoLocations] as SiteLocation[])
+    .flatMap((location) => location.records ?? [])
+    .flatMap((record) => record.crew ?? []),
+)].sort((left, right) => left.localeCompare(right, 'zh-TW'));
+
+const defaultEquipment: Array<Pick<EquipmentCatalogItem, 'name' | 'unit' | 'defaultQuantity' | 'packages' | 'note'>> = [
+  ['安全帽', '頂', 8, ['general'], '含下巴帶，作業前檢查帽體與扣具。'],
+  ['護目鏡', '副', 8, ['general'], '鏈鋸、碎屑與粉塵作業使用。'],
+  ['聽力防護耳罩', '副', 6, ['general'], '鏈鋸與碎木機操作人員使用。'],
+  ['防割手套', '雙', 8, ['general'], '依作業內容選用合適等級。'],
+  ['鏈鋸防護褲', '件', 4, ['pruning', 'removal', 'climbing'], '鏈鋸操作人員使用。'],
+  ['高可視反光背心', '件', 8, ['general'], '道路與人車混流區使用。'],
+  ['急救箱', '箱', 1, ['general'], '含止血與基礎創傷處理用品。'],
+  ['三角錐', '支', 12, ['general'], '建立施工與落枝管制區。'],
+  ['警示帶', '捲', 4, ['general'], '搭配三角錐封閉作業範圍。'],
+  ['無線電', '支', 6, ['general'], '樹上、地面與場控保持通訊。'],
+  ['攀樹安全吊帶', '套', 3, ['climbing'], '使用前依製造商規範檢查。'],
+  ['攀樹主繩', '條', 4, ['climbing'], '依作業系統與樹高配置。'],
+  ['工作定位繩', '條', 4, ['climbing'], '攀樹人員個人定位使用。'],
+  ['拋繩袋與拋繩線', '組', 3, ['climbing'], '建立攀樹繩路徑。'],
+  ['上升器', '組', 3, ['climbing'], '依核准攀樹系統搭配使用。'],
+  ['下降器', '組', 3, ['climbing'], '依繩徑與製造商規範使用。'],
+  ['攀樹救援繩組', '組', 1, ['climbing'], '須可立即取用，不與主作業繩混用。'],
+  ['樹上鏈鋸', '台', 2, ['pruning', 'removal', 'climbing'], '僅限受訓人員操作。'],
+  ['地面鏈鋸', '台', 2, ['pruning', 'removal'], '含備用鏈條與維護工具。'],
+  ['高枝鋸', '支', 3, ['pruning'], '地面修剪與小枝處理。'],
+  ['高枝剪', '支', 2, ['pruning'], '細枝修剪使用。'],
+  ['Rigging 繩', '條', 3, ['pruning', 'removal', 'climbing'], '依預估負載選擇繩徑與長度。'],
+  ['Rigging 滑輪', '組', 3, ['pruning', 'removal', 'climbing'], '含連接器與固定扁帶。'],
+  ['摩擦煞車器', '組', 2, ['pruning', 'removal', 'climbing'], '地面控制吊枝速度與張力。'],
+  ['固定扁帶', '條', 8, ['pruning', 'removal', 'climbing'], '依承載需求分色管理。'],
+  ['伐木楔', '組', 2, ['removal'], '輔助控制伐倒方向。'],
+  ['牽引器', '組', 1, ['removal'], '必要時建立受控牽引。'],
+  ['太空包', '個', 8, ['pruning', 'removal'], '集中細枝、葉材與現場廢棄物。'],
+  ['吹葉機', '台', 2, ['general'], '完工後清理路面與作業區。'],
+  ['碎木機', '台', 1, ['pruning', 'removal'], '須設置進料安全區並由指定人員操作。'],
+].map(([name, unit, defaultQuantity, packages, note]) => ({
+  name: name as string,
+  unit: unit as string,
+  defaultQuantity: defaultQuantity as number,
+  packages: packages as EquipmentPackage[],
+  note: note as string,
+}));
 
 const toggleValue = <T extends string>(values: T[], value: T) =>
   values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
@@ -66,21 +114,62 @@ export default function ResourceManagement({ account, notify }: Props) {
   const [editingEquipmentId, setEditingEquipmentId] = useState('');
   const [skillsText, setSkillsText] = useState('');
   const [saving, setSaving] = useState(false);
+  const [personnelLoaded, setPersonnelLoaded] = useState(false);
+  const [equipmentLoaded, setEquipmentLoaded] = useState(false);
+  const seedStarted = useRef(false);
 
   useEffect(() => {
     if (!db) return;
     const stopPersonnel = onSnapshot(
       query(collection(db, 'personnel'), orderBy('updatedAt', 'desc'), limit(100)),
-      (snapshot) => setPersonnel(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as Personnel)),
+      (snapshot) => { setPersonnel(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as Personnel)); setPersonnelLoaded(true); },
       () => notify('工作人員名單載入失敗。'),
     );
     const stopEquipment = onSnapshot(
       query(collection(db, 'equipmentCatalog'), orderBy('updatedAt', 'desc'), limit(100)),
-      (snapshot) => setEquipment(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as EquipmentCatalogItem)),
+      (snapshot) => { setEquipment(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as EquipmentCatalogItem)); setEquipmentLoaded(true); },
       () => notify('公裝器材列表載入失敗。'),
     );
     return () => { stopPersonnel(); stopEquipment(); };
   }, [account.uid, notify]);
+
+  const shouldSeedDefaults = useMemo(
+    () => personnelLoaded && equipmentLoaded && (!personnel.length || !equipment.length),
+    [personnelLoaded, equipmentLoaded, personnel.length, equipment.length],
+  );
+
+  useEffect(() => {
+    if (!db || !shouldSeedDefaults || seedStarted.current) return;
+    seedStarted.current = true;
+    const seed = async () => {
+      const batch = writeBatch(db!);
+      if (!personnel.length) defaultPersonnelNames.forEach((name, index) => {
+        const itemRef = doc(db!, 'personnel', `starter-person-${String(index + 1).padStart(2, '0')}`);
+        const auditRef = doc(collection(db!, 'activityLogs'));
+        batch.set(itemRef, {
+          name, code: '', jobTitle: '樹木工作夥伴', note: '由既有工作紀錄名單建立，可自行補充技能與角色。',
+          skills: [], allowedRoles: [], status: 'active', createdBy: account.uid,
+          createdAt: serverTimestamp(), updatedAt: serverTimestamp(), lastAuditId: auditRef.id,
+        });
+        batch.set(auditRef, auditData(account, 'personnel_create', itemRef.id, name));
+      });
+      if (!equipment.length) defaultEquipment.forEach((item, index) => {
+        const itemRef = doc(db!, 'equipmentCatalog', `starter-equipment-${String(index + 1).padStart(2, '0')}`);
+        const auditRef = doc(collection(db!, 'activityLogs'));
+        batch.set(itemRef, {
+          ...item, status: 'active', createdBy: account.uid,
+          createdAt: serverTimestamp(), updatedAt: serverTimestamp(), lastAuditId: auditRef.id,
+        });
+        batch.set(auditRef, auditData(account, 'equipment_create', itemRef.id, item.name));
+      });
+      await batch.commit();
+      notify('已依既有紀錄建立工作夥伴，並加入常用樹木作業公裝。');
+    };
+    void seed().catch(() => {
+      seedStarted.current = false;
+      notify('預設工作夥伴與公裝建立失敗，請稍後重新開啟此頁。');
+    });
+  }, [account, equipment.length, personnel.length, shouldSeedDefaults, notify]);
 
   function startPersonnel(item?: Personnel) {
     setEditingPersonnelId(item?.id ?? '');
@@ -162,12 +251,12 @@ export default function ResourceManagement({ account, notify }: Props) {
     <Box sx={{ maxWidth: 1100, mx: 'auto', p: { xs: 2, md: 4 } }}>
       <Stack spacing={3}>
         <Box>
-          <Typography variant="h4">人員與公裝主檔</Typography>
+          <Typography variant="h4">工作夥伴及公裝清單</Typography>
           <Typography color="text.secondary">由管理員維護全域名單；封存只會停止新紀錄選用，不影響舊紀錄。</Typography>
         </Box>
         <Stack direction="row" spacing={1}>
-          <Button variant={section === 'personnel' ? 'contained' : 'outlined'} onClick={() => setSection('personnel')}>工作人員</Button>
-          <Button variant={section === 'equipment' ? 'contained' : 'outlined'} onClick={() => setSection('equipment')}>公裝器材</Button>
+          <Button variant={section === 'personnel' ? 'contained' : 'outlined'} onClick={() => setSection('personnel')}>工作夥伴</Button>
+          <Button variant={section === 'equipment' ? 'contained' : 'outlined'} onClick={() => setSection('equipment')}>公裝清單</Button>
         </Stack>
         {section === 'personnel' ? (
           <>

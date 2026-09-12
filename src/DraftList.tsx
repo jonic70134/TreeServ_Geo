@@ -21,6 +21,7 @@ import EditNoteRounded from '@mui/icons-material/EditNoteRounded';
 import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { db } from './firebase';
 import { deleteDraftWithAssets, type DraftDocument } from './drafts';
+import type { PlanDraftData } from './PlanBook';
 
 function updatedLabel(value: any) {
   const date = value?.toDate?.() as Date | undefined;
@@ -39,9 +40,11 @@ function sizeLabel(bytes: number) {
 export default function DraftList({
   onOpen,
   notify,
+  kind = 'all',
 }: {
   onOpen: (draft: DraftDocument) => void;
   notify: (message: string) => void;
+  kind?: 'all' | 'pruning_plan';
 }) {
   const [drafts, setDrafts] = useState<DraftDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,7 +63,11 @@ export default function DraftList({
     );
   }, []);
 
-  const totalBytes = useMemo(() => drafts.reduce((sum, draft) => sum + (draft.sizeBytes || 0), 0), [drafts]);
+  const visibleDrafts = useMemo(
+    () => kind === 'pruning_plan' ? drafts.filter((draft) => draft.kind === 'pruning_plan') : drafts,
+    [drafts, kind],
+  );
+  const totalBytes = useMemo(() => visibleDrafts.reduce((sum, draft) => sum + (draft.sizeBytes || 0), 0), [visibleDrafts]);
 
   async function remove() {
     if (!removing || busy) return;
@@ -77,21 +84,23 @@ export default function DraftList({
     <Stack spacing={3}>
       <Box>
         <Typography variant="overline" color="primary">管理者專用</Typography>
-        <Typography variant="h4">草稿列表</Typography>
-        <Typography color="text.secondary">共 {drafts.length} 份草稿，估計使用 {sizeLabel(totalBytes)}。照片只有開啟計畫書草稿時才會下載。</Typography>
+        <Typography variant="h4">{kind === 'pruning_plan' ? '計畫書列表' : '草稿列表'}</Typography>
+        <Typography color="text.secondary">共 {visibleDrafts.length} 份{kind === 'pruning_plan' ? '計畫書' : '草稿'}，估計使用 {sizeLabel(totalBytes)}。照片只有開啟計畫書時才會下載。</Typography>
       </Box>
       <Alert severity="info">草稿存放於 Firebase Firestore，不占用網站主機磁碟；系統只在內容變更後寫入，避免每 30 秒重複傳送相同資料。</Alert>
-      {loading ? <Typography color="text.secondary">正在載入草稿…</Typography> : drafts.length === 0 ?
+      {loading ? <Typography color="text.secondary">正在載入資料…</Typography> : visibleDrafts.length === 0 ?
         <Paper variant="outlined" sx={{ p: 5, textAlign: 'center' }}><EditNoteRounded sx={{ fontSize: 52, color: 'text.disabled' }} /><Typography variant="h6">目前沒有草稿</Typography><Typography color="text.secondary">在計畫書或工作紀錄編輯畫面按「儲存草稿」後會顯示於此。</Typography></Paper>
-        : <Stack spacing={1.5}>{drafts.map((draft) => <Paper variant="outlined" sx={{ p: 2.2 }} key={draft.id}>
+        : <Stack spacing={1.5}>{visibleDrafts.map((draft) => {
+          const plan = draft.kind === 'pruning_plan' ? draft.data as PlanDraftData : undefined;
+          return <Paper variant="outlined" sx={{ p: 2.2 }} key={draft.id}>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' } }}>
             <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', minWidth: 0 }}>
               <Box sx={{ width: 44, height: 44, borderRadius: 2, display: 'grid', placeItems: 'center', bgcolor: 'primary.main', color: 'primary.contrastText', flex: 'none' }}><DescriptionRounded /></Box>
-              <Box sx={{ minWidth: 0 }}><Typography sx={{ fontWeight: 800 }} noWrap>{draft.title || '未命名草稿'}</Typography><Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}><Chip size="small" label={draft.kind === 'pruning_plan' ? '修剪計畫書' : '案場工作紀錄'} /><Typography variant="caption" color="text.secondary">{updatedLabel(draft.updatedAt)}・{draft.updatedByName || draft.createdByName}・{sizeLabel(draft.sizeBytes || 0)}</Typography></Stack></Box>
+              <Box sx={{ minWidth: 0 }}><Typography sx={{ fontWeight: 800 }} noWrap>{draft.title || '未命名草稿'}</Typography><Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}><Chip size="small" color={plan?.completedAt ? 'success' : 'default'} label={plan?.completedAt ? '已完成' : draft.kind === 'pruning_plan' ? '製作中' : '案場工作紀錄'} /><Typography variant="caption" color="text.secondary">{updatedLabel(draft.updatedAt)}・{draft.updatedByName || draft.createdByName}・{sizeLabel(draft.sizeBytes || 0)}</Typography></Stack></Box>
             </Stack>
-            <Stack direction="row" spacing={1}><Button variant="contained" onClick={() => onOpen(draft)}>繼續編輯</Button><Button color="error" startIcon={<DeleteOutlineRounded />} onClick={() => setRemoving(draft)}>刪除</Button></Stack>
+            <Stack direction="row" spacing={1}>{plan?.pdfLink && <Button component="a" href={plan.pdfLink} target="_blank" rel="noopener noreferrer" variant="outlined">開啟 PDF</Button>}<Button variant="contained" onClick={() => onOpen(draft)}>{plan?.completedAt ? '觀看／編輯' : '繼續編輯'}</Button><Button color="error" startIcon={<DeleteOutlineRounded />} onClick={() => setRemoving(draft)}>刪除</Button></Stack>
           </Stack>
-        </Paper>)}</Stack>}
+        </Paper>})}</Stack>}
     </Stack>
     <Dialog open={Boolean(removing)} onClose={() => !busy && setRemoving(undefined)}>
       <DialogTitle>刪除草稿？</DialogTitle><DialogContent><DialogContentText>「{removing?.title}」與其中的草稿照片都會刪除，無法復原。</DialogContentText></DialogContent>
