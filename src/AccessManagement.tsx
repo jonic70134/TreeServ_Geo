@@ -50,7 +50,7 @@ type Invite = {
   role: 'admin' | 'user';
   status: 'pending' | 'accepted' | 'revoked';
   invitedByEmail?: string;
-  invitedAt?: any;
+  invitedAt?: unknown;
 };
 type Member = {
   id: string;
@@ -59,13 +59,20 @@ type Member = {
   displayName: string;
   role: 'admin' | 'user';
   status: 'active' | 'disabled';
-  acceptedAt?: any;
+  acceptedAt?: unknown;
 };
 
 const roleLabel = (role: string) =>
   role === 'admin' ? '系統管理者' : '一般使用者';
-const dateLabel = (value: any) =>
-  value?.toDate ? value.toDate().toLocaleString('zh-TW') : '同步中';
+const dateLabel = (value: unknown) => {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('toDate' in value) ||
+    typeof value.toDate !== 'function'
+  ) return '同步中';
+  return value.toDate().toLocaleString('zh-TW');
+};
 
 export default function AccessManagement({
   account,

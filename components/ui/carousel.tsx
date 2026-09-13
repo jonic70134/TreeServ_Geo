@@ -95,12 +95,13 @@ function Carousel({
 
   React.useEffect(() => {
     if (!api) return;
-    onSelect(api);
+    queueMicrotask(() => onSelect(api));
     api.on('reInit', onSelect);
     api.on('select', onSelect);
 
     return () => {
-      api?.off('select', onSelect);
+      api.off('reInit', onSelect);
+      api.off('select', onSelect);
     };
   }, [api, onSelect]);
 
@@ -121,6 +122,8 @@ function Carousel({
       <div
         onKeyDownCapture={handleKeyDown}
         className={cn('relative', className)}
+        // ARIA carousel pattern uses region plus roledescription; no native carousel exists.
+        // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
         role="region"
         aria-roledescription="carousel"
         data-slot="carousel"
@@ -158,6 +161,8 @@ function CarouselItem({ className, ...props }: React.ComponentProps<'div'>) {
 
   return (
     <div
+      // ARIA carousel slides are grouped elements without a native HTML equivalent.
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
       role="group"
       aria-roledescription="slide"
       data-slot="carousel-item"

@@ -100,7 +100,7 @@ npm run test:rules
 npm run format
 ```
 
-第一階段 CI 位於 `.github/workflows/ci.yml`，只驗證、不部署。型別檢查、MCP 測試與正式建置是強制關卡；lint 目前會完整執行並標示既有問題，但在既有技術債清除前暫不阻擋 CI。Firestore Rules 測試仍需由 `127.0.0.1:8088` 的 Emulator 執行，尚未納入此 workflow。
+第一階段 CI 位於 `.github/workflows/ci.yml`，只驗證、不部署。型別檢查、lint、MCP 測試與正式建置都是強制關卡；任一項失敗都會阻擋 CI。Firestore Rules 測試仍需由 `127.0.0.1:8088` 的 Emulator 執行，尚未納入此 workflow。
 
 ## 驗證與權限流程
 

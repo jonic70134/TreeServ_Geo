@@ -77,7 +77,7 @@ export type WorkRecord = {
   routePoints?: RoutePoint[];
   routeNotes?: string;
   sourceImported?: boolean;
-  createdAt?: any;
+  createdAt?: unknown;
   dateLabel?: string;
   workDate?: string;
   endDate?: string;
@@ -130,6 +130,6 @@ export type SiteLocation = {
   recordCount?: number;
   latestRecordAt?: unknown;
   latestRecordTitle?: string;
-  updatedAt?: any;
+  updatedAt?: unknown;
   createdBy?: string;
 };

@@ -375,7 +375,7 @@ function LinkifiedText({ children }: { children?: string }) {
 export default function TreeServApp() {
   const [account, setAccount] = useState<User>();
   const [role, setRole] = useState<AccessRole>();
-  const [authBusy, setAuthBusy] = useState(true);
+  const [authBusy, setAuthBusy] = useState(Boolean(auth));
   const [authError, setAuthError] = useState('');
   const [view, setView] = useState<View>('map');
   const [liveLocations, setLiveLocations] = useState<SiteLocation[]>([]);
@@ -431,16 +431,26 @@ export default function TreeServApp() {
   const notify = (message: string) => setToast(message);
 
   useEffect(() => {
-    if (!auth) {
-      setAuthBusy(false);
-      return;
-    }
+    if (!auth) return;
     return onAuthStateChanged(auth, async (next) => {
       setAuthBusy(true);
       if (!next) {
         setAccount(undefined);
         setRole(undefined);
         setView('map');
+        setLiveLocations([]);
+        setOlderLocations([]);
+        setLocationCursor(undefined);
+        setHasMoreLocations(false);
+        setLiveRecords([]);
+        setOlderRecords([]);
+        setRecordCursor(undefined);
+        setHasMoreRecords(false);
+        setScheduledRecords([]);
+        setPersonnel([]);
+        setEquipmentCatalog([]);
+        setPlans([]);
+        setDeletedImports([]);
         setAuthBusy(false);
         return;
       }
@@ -453,6 +463,19 @@ export default function TreeServApp() {
       } catch (error) {
         setAccount(undefined);
         setRole(undefined);
+        setLiveLocations([]);
+        setOlderLocations([]);
+        setLocationCursor(undefined);
+        setHasMoreLocations(false);
+        setLiveRecords([]);
+        setOlderRecords([]);
+        setRecordCursor(undefined);
+        setHasMoreRecords(false);
+        setScheduledRecords([]);
+        setPersonnel([]);
+        setEquipmentCatalog([]);
+        setPlans([]);
+        setDeletedImports([]);
         setAuthError(
           error instanceof AccessDeniedError
             ? error.message
@@ -466,22 +489,7 @@ export default function TreeServApp() {
   }, []);
 
   useEffect(() => {
-    if (!db || !account || !role) {
-      setLiveLocations([]);
-      setOlderLocations([]);
-      setLocationCursor(undefined);
-      setHasMoreLocations(false);
-      setLiveRecords([]);
-      setOlderRecords([]);
-      setRecordCursor(undefined);
-      setHasMoreRecords(false);
-      setScheduledRecords([]);
-      setPersonnel([]);
-      setEquipmentCatalog([]);
-      setPlans([]);
-      setDeletedImports([]);
-      return;
-    }
+    if (!db || !account || !role) return;
     const stopLocations = onSnapshot(
       query(
         collection(db, 'locations'),
@@ -542,13 +550,17 @@ export default function TreeServApp() {
   }, [account, role]);
 
   useEffect(() => {
-    setLiveRecords([]);
-    setOlderRecords([]);
-    setRecordCursor(undefined);
-    setHasMoreRecords(false);
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setLiveRecords([]);
+      setOlderRecords([]);
+      setRecordCursor(undefined);
+      setHasMoreRecords(false);
+      setRecordsLoading(Boolean(db && account && role && activeId));
+    });
     if (!db || !account || !role || !activeId) return;
-    setRecordsLoading(true);
-    return onSnapshot(
+    const stop = onSnapshot(
       query(
         collection(db, 'workRecords'),
         where('locationId', '==', activeId),
@@ -570,6 +582,7 @@ export default function TreeServApp() {
         notify('工作紀錄同步暫時中斷。');
       },
     );
+    return () => { active = false; stop(); };
   }, [account, role, activeId]);
 
   async function loadMoreLocations() {
@@ -822,7 +835,7 @@ export default function TreeServApp() {
     ...(editing?.id ? { editingId: editing.id, editingLocationId: editing.locationId } : {}),
   }), [form, routePoints, routeNotes, newSite, editing]);
   const recordDraftSignature = useMemo(() => JSON.stringify(recordDraftPayload), [recordDraftPayload]);
-  recordDraftPayloadRef.current = recordDraftPayload;
+  useEffect(() => { recordDraftPayloadRef.current = recordDraftPayload; }, [recordDraftPayload]);
 
   useEffect(() => {
     if (!recordOpen || !canManage) return;
@@ -883,7 +896,7 @@ export default function TreeServApp() {
       setDraftSaving(false);
     }
   }
-  saveRecordDraftRef.current = saveRecordDraft;
+  useEffect(() => { saveRecordDraftRef.current = saveRecordDraft; });
 
   function openCreate(forCurrentSite: boolean) {
     const current = activeLocation;
@@ -1966,6 +1979,8 @@ export default function TreeServApp() {
                       {activeRecord.imageUrls?.length > 0 && (
                         <Box className="mui-image-grid">
                           {activeRecord.imageUrls.map((url) => (
+                            // Work-record URLs can be user-selected external hosts that Next Image cannot preconfigure.
+                            // oxlint-disable-next-line next/no-img-element
                             <img
                               key={url}
                               src={url}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { Box, Button, Stack, Typography } from '@mui/material';
 import UndoRounded from '@mui/icons-material/UndoRounded';
 import DeleteSweepRounded from '@mui/icons-material/DeleteSweepRounded';
@@ -24,10 +24,15 @@ export default function RouteMap({
   const layer = useRef<L.LayerGroup | undefined>(undefined);
   const valueRef = useRef(value);
   const editableRef = useRef(editable);
-  valueRef.current = value;
-  editableRef.current = editable;
+  const onChangeRef = useRef(onChange);
+  const initialCenter = useRef(center);
+  const { lat: centerLat, lng: centerLng } = center;
 
-  function draw() {
+  useEffect(() => { valueRef.current = value; }, [value]);
+  useEffect(() => { editableRef.current = editable; }, [editable]);
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+
+  const draw = useCallback(() => {
     if (!map.current || !layer.current) return;
     layer.current.clearLayers();
     const points = valueRef.current;
@@ -54,7 +59,7 @@ export default function RouteMap({
       );
       marker.on('dragend', () => {
         const current = valueRef.current;
-        onChange?.(
+        onChangeRef.current?.(
           current.map((item, i) =>
             i === index
               ? { lat: marker.getLatLng().lat, lng: marker.getLatLng().lng }
@@ -82,11 +87,12 @@ export default function RouteMap({
         }).addTo(layer.current!);
       }
     });
-  }
+  }, []);
 
   useEffect(() => {
-    if (!host.current) return;
-    const instance = L.map(host.current).setView(center, 16);
+    const hostElement = host.current;
+    if (!hostElement) return;
+    const instance = L.map(hostElement).setView(initialCenter.current, 16);
     map.current = instance;
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -95,21 +101,21 @@ export default function RouteMap({
     layer.current = L.layerGroup().addTo(instance);
     instance.on('click', (event: L.LeafletMouseEvent) => {
       if (editableRef.current && valueRef.current.length < 100)
-        onChange?.([
+        onChangeRef.current?.([
           ...valueRef.current,
           { lat: event.latlng.lat, lng: event.latlng.lng },
         ]);
     });
     instance.on('zoomend', draw);
     const resize = new ResizeObserver(() => instance.invalidateSize());
-    resize.observe(host.current);
+    resize.observe(hostElement);
     draw();
     return () => {
       resize.disconnect();
       instance.remove();
       map.current = undefined;
     };
-  }, []);
+  }, [draw]);
 
   useEffect(() => {
     draw();
@@ -118,8 +124,8 @@ export default function RouteMap({
         padding: [32, 32],
         maxZoom: 17,
       });
-    else if (!value.length) map.current?.setView(center, 16);
-  }, [value, editable, center.lat, center.lng]);
+    else if (!value.length) map.current?.setView({ lat: centerLat, lng: centerLng }, 16);
+  }, [value, editable, centerLat, centerLng, draw]);
 
   return (
     <Stack spacing={1.5}>

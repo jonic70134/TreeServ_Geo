@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -23,9 +23,14 @@ import { db } from './firebase';
 import { deleteDraftWithAssets, type DraftDocument } from './drafts';
 import type { PlanDraftData } from './PlanBook';
 
-function updatedLabel(value: any) {
-  const date = value?.toDate?.() as Date | undefined;
-  if (!date) return '剛剛儲存';
+function updatedLabel(value: unknown) {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('toDate' in value) ||
+    typeof value.toDate !== 'function'
+  ) return '剛剛儲存';
+  const date = value.toDate();
   return new Intl.DateTimeFormat('zh-TW', {
     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
   }).format(date);
@@ -47,19 +52,22 @@ export default function DraftList({
   kind?: 'all' | 'pruning_plan';
 }) {
   const [drafts, setDrafts] = useState<DraftDocument[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(db));
   const [removing, setRemoving] = useState<DraftDocument>();
   const [busy, setBusy] = useState(false);
+  const notifyRef = useRef(notify);
+
+  useEffect(() => { notifyRef.current = notify; }, [notify]);
 
   useEffect(() => {
-    if (!db) { setLoading(false); return; }
+    if (!db) return;
     return onSnapshot(
       query(collection(db, 'drafts'), orderBy('updatedAt', 'desc'), limit(50)),
       (snapshot) => {
         setDrafts(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }) as DraftDocument));
         setLoading(false);
       },
-      () => { setLoading(false); notify('草稿列表暫時無法同步。'); },
+      () => { setLoading(false); notifyRef.current('草稿列表暫時無法同步。'); },
     );
   }, []);
 

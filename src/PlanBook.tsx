@@ -91,7 +91,7 @@ export default function PlanBook({
     areaName: '', siteName: initialLocation?.name ?? '', title: '樹木修剪計畫書', description: '', surveyDate: today,
     evaluator: '職人樹藝有限公司', coverPhoto: '',
   };
-  const [cover, setCover] = useState<CoverData>({ ...defaultCover, ...(initialDraft?.data.cover ?? {}), coverPhoto: '' });
+  const [cover, setCover] = useState<CoverData>({ ...defaultCover, ...initialDraft?.data.cover, coverPhoto: '' });
   const [coverHasAsset, setCoverHasAsset] = useState(Boolean(initialDraft?.data.cover.hasCoverPhoto));
   const [items, setItems] = useState<TreePlan[]>(
     initialDraft?.data.items?.length
@@ -176,7 +176,7 @@ export default function PlanBook({
     setMessage(value);
     window.setTimeout(() => setMessage((current) => current === value ? '' : current), 4500);
   };
-  const safeName = (value: string) => (value.trim() || '樹木修剪計畫書').replace(/[\\/:*?\"<>|]/g, '-').replace(/\s+/g, '-');
+  const safeName = (value: string) => (value.trim() || '樹木修剪計畫書').replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-');
   const setCoverField = (field: keyof typeof cover, value: string) => setCover((current) => ({ ...current, [field]: value }));
 
   function updateItem(id: string, patch: Partial<TreePlan>) {
@@ -334,7 +334,7 @@ export default function PlanBook({
       })));
     }).catch(() => notify('草稿文字已載入，但部分照片暫時無法下載。'));
     return () => { active = false; };
-  }, [initialDraft?.id]);
+  }, [initialDraft]);
   useEffect(() => {
     if (!draftInitialized.current) {
       draftInitialized.current = true;
@@ -442,7 +442,7 @@ export default function PlanBook({
       setDraftSaving(false);
     }
   }
-  savePlanDraftRef.current = savePlanDraft;
+  useEffect(() => { savePlanDraftRef.current = savePlanDraft; });
 
   async function ensureConnection() {
     let token = driveToken, folder = driveFolder;
@@ -528,7 +528,11 @@ export default function PlanBook({
     return <>
       <article className={`plan-document-page plan-cover-page${cover.coverPhoto ? ' has-photo' : ''}`}>
         <div className="plan-cover-bands" />
-        {cover.coverPhoto && <div className="plan-cover-image-wrap"><img src={cover.coverPhoto} alt="" /></div>}
+        {cover.coverPhoto && <div className="plan-cover-image-wrap">
+          {/* User-provided data URLs must stay on a native image for PDF capture. */}
+          {/* oxlint-disable-next-line next/no-img-element */}
+          <img src={cover.coverPhoto} alt="" />
+        </div>}
         <div className="plan-cover-title">
           {cover.areaName && <span>{cover.areaName}</span>}
           <span>{cover.siteName || '案場名稱'}</span>
@@ -551,7 +555,11 @@ export default function PlanBook({
           <h2>照片說明</h2>
           <div className={`plan-photo-grid layout-${item.layout}`}>
             {item.photos.map((photo, index) => <div className="plan-photo-cell" key={photo.id}>
-              {photo.source ? <img src={photo.annotated || photo.source} alt="" /> : <div className="plan-photo-placeholder">照片 {index + 1}</div>}
+              {photo.source ? <>
+                {/* User-provided data URLs must stay on a native image for PDF capture. */}
+                {/* oxlint-disable-next-line next/no-img-element */}
+                <img src={photo.annotated || photo.source} alt="" />
+              </> : <div className="plan-photo-placeholder">照片 {index + 1}</div>}
               {photo.caption && <span>{photo.caption}</span>}
             </div>)}
           </div>
@@ -624,7 +632,10 @@ export default function PlanBook({
         <Box className={`plan-photo-input-grid layout-${item.layout}`}>
           {item.photos.map((photo, photoIndex) => <Paper variant="outlined" className="plan-photo-input" key={photo.id}>
             <Typography variant="subtitle2">照片 {photoIndex + 1}</Typography>
-            {photo.source ? <button type="button" className={`plan-photo-thumb${selectedPhotoId === photo.id ? ' selected' : ''}`} onClick={() => setSelectedPhotoId(photo.id)}><img src={photo.annotated || photo.source} alt="" /><span>選取並標註</span></button>
+            {photo.source ? <button type="button" className={`plan-photo-thumb${selectedPhotoId === photo.id ? ' selected' : ''}`} onClick={() => setSelectedPhotoId(photo.id)}>
+              {/* User-provided data URLs are previewed before they are uploaded. */}
+              {/* oxlint-disable-next-line next/no-img-element */}
+              <img src={photo.annotated || photo.source} alt="" /><span>選取並標註</span></button>
               : <Button component="label" variant="outlined" className="plan-photo-add" startIcon={<AddPhotoAlternateRounded />}>選擇照片<input hidden type="file" accept="image/*" onChange={(event) => addPhoto(photo, event)} /></Button>}
             <TextField size="small" label="圖號／照片說明（選填）" placeholder={`例如：圖${photoIndex + 1}`} value={photo.caption} onChange={(event) => updatePhoto(photo.id, { caption: event.target.value })} />
             {photo.source && <Stack direction="row" spacing={1}>

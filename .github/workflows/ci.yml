@@ -41,13 +41,7 @@ jobs:
         run: npm run typecheck
 
       - name: 程式碼規則檢查
-        id: lint
-        continue-on-error: true
         run: npm run lint
-
-      - name: 標記既有 lint 技術債
-        if: steps.lint.outcome == 'failure'
-        run: echo "::warning::Lint 仍有既有技術債；目前會顯示報告，但暫不阻擋 CI。"
 
       - name: Google Sheets MCP 測試
         run: npm run test:mcp

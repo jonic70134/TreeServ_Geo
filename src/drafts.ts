@@ -21,10 +21,10 @@ export type DraftDocument<T = Record<string, unknown>> = {
   data: T;
   createdBy: string;
   createdByName: string;
-  createdAt?: any;
+  createdAt?: unknown;
   updatedBy: string;
   updatedByName: string;
-  updatedAt?: any;
+  updatedAt?: unknown;
   saveMode: 'manual' | 'auto';
   sizeBytes: number;
   assetCount: number;

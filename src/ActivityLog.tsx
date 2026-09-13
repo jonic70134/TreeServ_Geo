@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert, Box, Button, Chip, CircularProgress, Paper, Stack, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, Typography,
@@ -16,34 +16,51 @@ const labels: Record<string, string> = {
   equipment_create: '新增公裝器材', equipment_update: '更新公裝器材',
 };
 
-function formatTime(value: any) {
-  return value?.toDate
-    ? new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(value.toDate())
-    : '時間同步中';
+type ActivityEntry = {
+  id: string;
+  timestamp?: unknown;
+  actorName?: string;
+  actorEmail?: string;
+  action?: string;
+  recordTitle?: string;
+  recordId?: string;
+};
+
+function formatTime(value: unknown) {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('toDate' in value) ||
+    typeof value.toDate !== 'function'
+  ) return '時間同步中';
+  return new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(value.toDate());
 }
 
 export default function ActivityLog() {
-  const [entries, setEntries] = useState<any[]>([]);
+  const [entries, setEntries] = useState<ActivityEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [more, setMore] = useState(true);
-  const [cursor, setCursor] = useState<QueryDocumentSnapshot>();
+  const busyRef = useRef(false);
+  const cursorRef = useRef<QueryDocumentSnapshot | undefined>(undefined);
 
-  async function load(reset = false) {
-    if (!db || busy) return;
+  const load = useCallback(async (reset = false) => {
+    if (!db || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true); setError('');
     try {
-      const result = await getDocs(query(collection(db, 'activityLogs'), orderBy('timestamp', 'desc'), ...(!reset && cursor ? [startAfter(cursor)] : []), limit(50)));
-      const rows = result.docs.map((item) => ({ id: item.id, ...item.data() }));
+      const result = await getDocs(query(collection(db, 'activityLogs'), orderBy('timestamp', 'desc'), ...(!reset && cursorRef.current ? [startAfter(cursorRef.current)] : []), limit(50)));
+      const rows = result.docs.map((item) => ({ id: item.id, ...item.data() }) as ActivityEntry);
       setEntries((current) => reset ? rows : [...current, ...rows]);
-      setCursor(result.docs.at(-1));
+      const nextCursor = result.docs.at(-1);
+      cursorRef.current = nextCursor;
       setMore(result.size === 50);
     } catch {
       setError('無法讀取操作紀錄，請確認目前帳號具有 Owner 或系統管理者權限。');
-    } finally { setBusy(false); }
-  }
+    } finally { busyRef.current = false; setBusy(false); }
+  }, []);
 
-  useEffect(() => { void load(true); }, []);
+  useEffect(() => { queueMicrotask(() => void load(true)); }, [load]);
 
   return (
     <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1440, mx: 'auto' }}>
@@ -56,7 +73,7 @@ export default function ActivityLog() {
         <Table>
           <TableHead><TableRow><TableCell>時間</TableCell><TableCell>登入者</TableCell><TableCell>操作</TableCell><TableCell>對象</TableCell></TableRow></TableHead>
           <TableBody>
-            {entries.map((entry) => <TableRow key={entry.id} hover><TableCell sx={{ whiteSpace: 'nowrap' }}>{formatTime(entry.timestamp)}</TableCell><TableCell>{entry.actorName || '—'}<Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{entry.actorEmail}</Typography></TableCell><TableCell><Chip size="small" label={labels[entry.action] || entry.action} /></TableCell><TableCell>{entry.recordTitle || '—'}{entry.recordId && <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{entry.recordId}</Typography>}</TableCell></TableRow>)}
+            {entries.map((entry) => <TableRow key={entry.id} hover><TableCell sx={{ whiteSpace: 'nowrap' }}>{formatTime(entry.timestamp)}</TableCell><TableCell>{entry.actorName || '—'}<Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{entry.actorEmail}</Typography></TableCell><TableCell><Chip size="small" label={labels[entry.action ?? ''] || entry.action || '—'} /></TableCell><TableCell>{entry.recordTitle || '—'}{entry.recordId && <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{entry.recordId}</Typography>}</TableCell></TableRow>)}
             {!entries.length && !busy && <TableRow><TableCell colSpan={4} align="center">尚無登入或操作紀錄。</TableCell></TableRow>}
           </TableBody>
         </Table>
