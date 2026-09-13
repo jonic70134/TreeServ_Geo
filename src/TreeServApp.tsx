@@ -49,6 +49,7 @@ import SaveRounded from '@mui/icons-material/SaveRounded';
 import GroupsRounded from '@mui/icons-material/GroupsRounded';
 import ConstructionRounded from '@mui/icons-material/ConstructionRounded';
 import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded';
+import LinkRounded from '@mui/icons-material/LinkRounded';
 import {
   AccessDeniedError,
   auditData,
@@ -219,6 +220,16 @@ const normalizeSearch = (value: string) =>
     .toLocaleLowerCase('zh-TW')
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
+const requestedSiteId = () => {
+  if (typeof window === 'undefined') return '';
+  return new URLSearchParams(window.location.search).get('site')?.trim() ?? '';
+};
+const siteUrl = (siteId: string) => {
+  if (typeof window === 'undefined') return '';
+  const url = new URL(window.location.origin);
+  url.searchParams.set('site', siteId);
+  return url.toString();
+};
 const youtubeId = (url: string) =>
   url.match(
     /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([\w-]{11})/,
@@ -393,7 +404,9 @@ export default function TreeServApp() {
   const [equipmentCatalog, setEquipmentCatalog] = useState<EquipmentCatalogItem[]>([]);
   const [plans, setPlans] = useState<DraftDocument<PlanDraftData>[]>([]);
   const [deletedImports, setDeletedImports] = useState<string[]>([]);
-  const [activeId, setActiveId] = useState(demos[0]?.id ?? '');
+  const [activeId, setActiveId] = useState(
+    () => requestedSiteId() || demos[0]?.id || '',
+  );
   const [activeRecordId, setActiveRecordId] = useState('');
   const [search, setSearch] = useState('');
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement>();
@@ -429,6 +442,37 @@ export default function TreeServApp() {
   }>();
 
   const notify = (message: string) => setToast(message);
+
+  function selectLocation(siteId: string) {
+    setActiveId(siteId);
+    setActiveRecordId('');
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('site', siteId);
+    window.history.replaceState(null, '', url);
+  }
+
+  async function copySiteUrl(siteId: string) {
+    try {
+      await navigator.clipboard.writeText(siteUrl(siteId));
+      notify('案場直達連結已複製。');
+    } catch {
+      notify('無法複製連結，請確認瀏覽器已允許剪貼簿權限。');
+    }
+  }
+
+  useEffect(() => {
+    const syncSiteFromUrl = () => {
+      const siteId = requestedSiteId();
+      if (siteId) {
+        setActiveId(siteId);
+        setActiveRecordId('');
+        setView('map');
+      }
+    };
+    window.addEventListener('popstate', syncSiteFromUrl);
+    return () => window.removeEventListener('popstate', syncSiteFromUrl);
+  }, []);
 
   useEffect(() => {
     if (!auth) return;
@@ -548,6 +592,25 @@ export default function TreeServApp() {
       stopPlans();
     };
   }, [account, role]);
+
+  useEffect(() => {
+    if (!db || !account || !role || !activeId) return;
+    if (activeId.includes('/') || activeId.length > 200) return;
+    if (demos.some((location) => location.id === activeId)) return;
+    if ([...liveLocations, ...olderLocations].some((location) => location.id === activeId)) return;
+    let active = true;
+    void getDoc(doc(db, 'locations', activeId)).then(
+      (snapshot) => {
+        if (!active || !snapshot.exists()) return;
+        setOlderLocations((current) => [
+          { id: snapshot.id, ...snapshot.data() } as SiteLocation,
+          ...current.filter((location) => location.id !== snapshot.id),
+        ]);
+      },
+      () => notify('無法載入這個案場直達連結。'),
+    );
+    return () => { active = false; };
+  }, [account, role, activeId, liveLocations, olderLocations]);
 
   useEffect(() => {
     let active = true;
@@ -974,7 +1037,7 @@ export default function TreeServApp() {
       notify('找不到這份草稿原本編輯的工作紀錄，可能已被刪除。');
       return;
     }
-    if (data.editingLocationId) setActiveId(data.editingLocationId);
+    if (data.editingLocationId) selectLocation(data.editingLocationId);
     setEditing(sourceRecord);
     setNewSite(Boolean(data.newSite));
     setForm({
@@ -1176,7 +1239,7 @@ export default function TreeServApp() {
         (location) => normalizeSearch(location.name) === normalizeSearch(siteForm.name) || normalizeSearch(location.address) === normalizeSearch(siteForm.address),
       );
       if (duplicate) {
-        setActiveId(duplicate.id);
+        selectLocation(duplicate.id);
         setSiteOpen(false);
         setView('map');
         notify(`已切換到現有案場「${duplicate.name}」。`);
@@ -1191,7 +1254,7 @@ export default function TreeServApp() {
         createdBy: account.uid, updatedAt: serverTimestamp(),
       });
       await batch.commit();
-      setActiveId(siteRef.id);
+      selectLocation(siteRef.id);
       setSiteOpen(false);
       setSiteForm({ name: '', address: '', attention: '' });
       setView('map');
@@ -1274,7 +1337,10 @@ export default function TreeServApp() {
           setLiveLocations((current) => current.filter((item) => item.id !== record.locationId));
           setOlderLocations((current) => current.filter((item) => item.id !== record.locationId));
         }
-        if (removeLocation) setActiveId(sortedLocations.find((location) => location.id !== record.locationId)?.id ?? '');
+        if (removeLocation)
+          selectLocation(
+            sortedLocations.find((location) => location.id !== record.locationId)?.id ?? '',
+          );
         notify(removeLocation ? '紀錄與空案場地標已刪除。' : '紀錄已刪除。');
       },
     });
@@ -1655,7 +1721,7 @@ export default function TreeServApp() {
           locations={sortedLocations}
           personnel={personnel}
           onOpen={(record) => {
-            setActiveId(record.locationId);
+            selectLocation(record.locationId);
             setActiveRecordId(record.id);
             setView('map');
           }}
@@ -1667,22 +1733,13 @@ export default function TreeServApp() {
       ) : (
         <Box className="mui-workspace">
           <Paper square variant="outlined" className="mui-place-list">
-            <Box sx={{ p: 2 }}>
-              <Typography variant="overline" color="text.secondary">
-                工作地點
-              </Typography>
-              <Typography variant="h6">
-                已載入 {filteredLocations.length} 個案場
-              </Typography>
-            </Box>
-            <Divider />
             <Box className="mobile-site-select" sx={{ p: 2 }}>
               <TextField
                 select
                 fullWidth
                 label="切換案場"
                 value={activeLocation?.id ?? ''}
-                onChange={(event) => setActiveId(event.target.value)}
+                onChange={(event) => selectLocation(event.target.value)}
               >
                 {filteredLocations.map((location) => (
                   <MenuItem key={location.id} value={location.id}>
@@ -1696,7 +1753,7 @@ export default function TreeServApp() {
                 <ListItemButton
                   key={location.id}
                   selected={location.id === activeLocation?.id}
-                  onClick={() => setActiveId(location.id)}
+                  onClick={() => selectLocation(location.id)}
                 >
                   <ListItemText
                     primary={location.name}
@@ -1727,12 +1784,22 @@ export default function TreeServApp() {
                 <Box>
                   <Stack
                     direction="row"
-                    sx={{ justifyContent: 'space-between' }}
+                    sx={{ justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}
                   >
                     <Typography variant="overline" color="text.secondary">
                       案場紀錄
                     </Typography>
-                    <Chip size="small" label={locationStatus(activeLocation)} />
+                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<LinkRounded />}
+                        onClick={() => void copySiteUrl(activeLocation.id)}
+                      >
+                        複製案場連結
+                      </Button>
+                      <Chip size="small" label={locationStatus(activeLocation)} />
+                    </Stack>
                   </Stack>
                   <Typography variant="h4">{activeLocation.name}</Typography>
                   <Typography color="text.secondary">
@@ -2062,7 +2129,7 @@ export default function TreeServApp() {
             <SiteMap
               locations={sortedLocations}
               activeId={activeId}
-              onSelect={(location) => setActiveId(location.id)}
+              onSelect={(location) => selectLocation(location.id)}
             />
             <Chip
               className="map-provider-chip"
