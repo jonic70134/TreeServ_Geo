@@ -1430,33 +1430,44 @@ export default function TreeServApp() {
               },
             }}
           />
-          <Button
-            sx={{ display: { xs: 'none', md: 'inline-flex' } }}
-            variant="contained"
-            startIcon={<AddRounded />}
-            onClick={() => setSiteOpen(true)}
+          <Box
+            component="div"
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1.5,
+              ml: 'auto',
+              flexShrink: 0,
+            }}
           >
-            建立案場紀錄
-          </Button>
-          {canManage && (
             <Button
-              sx={{ display: { xs: 'none', lg: 'inline-flex' } }}
-              color="secondary"
+              sx={{ display: { xs: 'none', md: 'inline-flex' } }}
               variant="contained"
-              startIcon={<DescriptionRounded />}
-              onClick={() => { setPlanDraft(undefined); setView('plan'); }}
+              startIcon={<AddRounded />}
+              onClick={() => setSiteOpen(true)}
             >
-              製作計畫書
+              建立案場紀錄
             </Button>
-          )}
-          <Tooltip title="開啟選單">
-            <IconButton
-              onClick={(event) => setMenuAnchor(event.currentTarget)}
-              aria-label="開啟功能選單"
-            >
-              <MenuRounded />
-            </IconButton>
-          </Tooltip>
+            {canManage && (
+              <Button
+                sx={{ display: { xs: 'none', lg: 'inline-flex' } }}
+                color="secondary"
+                variant="contained"
+                startIcon={<DescriptionRounded />}
+                onClick={() => { setPlanDraft(undefined); setView('plan'); }}
+              >
+                製作計畫書
+              </Button>
+            )}
+            <Tooltip title="開啟選單">
+              <IconButton
+                onClick={(event) => setMenuAnchor(event.currentTarget)}
+                aria-label="開啟功能選單"
+              >
+                <MenuRounded />
+              </IconButton>
+            </Tooltip>
+          </Box>
         </Toolbar>
       </AppBar>
       <Menu
