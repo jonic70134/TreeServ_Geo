@@ -9,6 +9,7 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "wrangler dev --config dist/server/wrangler.json",
+    "typecheck": "tsc --noEmit",
     "lint": "oxlint",
     "test:rules": "node --test tests/firestore-rules.test.mjs",
     "test:mcp": "node --test tests/google-sheets-devlog.test.mjs",
