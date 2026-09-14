@@ -269,7 +269,7 @@ test('owner and admin deletion require an atomic receipt and activity record', a
   assert.equal((await getDoc(doc(owner, 'workRecords', 'delete-by-admin'))).exists(), false);
 });
 
-test('owner and admin manage other member roles and status, but admin cannot alter itself', async () => {
+test('only owner changes roles, while admins can change other user status', async () => {
   const ownerBatch = writeBatch(owner);
   const ownerAudit = doc(collection(owner, 'activityLogs'));
   ownerBatch.update(doc(owner, 'members', 'other'), { role: 'admin', updatedAt: serverTimestamp() });
@@ -281,12 +281,26 @@ test('owner and admin manage other member roles and status, but admin cannot alt
   adminBatch.update(doc(admin, 'members', 'member'), { status: 'disabled', updatedAt: serverTimestamp() });
   adminBatch.set(adminAudit, entry('admin', 'member_disable', 'member', identity.member));
   await assertSucceeds(adminBatch.commit());
+
+  const adminRoleBatch = writeBatch(admin);
+  const adminRoleAudit = doc(collection(admin, 'activityLogs'));
+  adminRoleBatch.update(doc(admin, 'members', 'member'), { role: 'admin', updatedAt: serverTimestamp() });
+  adminRoleBatch.set(adminRoleAudit, entry('admin', 'member_role', 'member', identity.member));
+  await assertFails(adminRoleBatch.commit());
+  await assertFails(updateDoc(doc(member, 'members', 'other'), { role: 'admin', updatedAt: serverTimestamp() }));
+
   const otherAdminBatch = writeBatch(admin);
   const otherAdminAudit = doc(collection(admin, 'activityLogs'));
   otherAdminBatch.update(doc(admin, 'members', 'other'), { status: 'disabled', updatedAt: serverTimestamp() });
   otherAdminBatch.set(otherAdminAudit, entry('admin', 'member_disable', 'other', identity.other));
-  await assertSucceeds(otherAdminBatch.commit());
+  await assertFails(otherAdminBatch.commit());
   await assertFails(updateDoc(doc(admin, 'members', 'admin'), { status: 'disabled', updatedAt: serverTimestamp() }));
+
+  const ownerDemotionBatch = writeBatch(owner);
+  const ownerDemotionAudit = doc(collection(owner, 'activityLogs'));
+  ownerDemotionBatch.update(doc(owner, 'members', 'other'), { role: 'user', updatedAt: serverTimestamp() });
+  ownerDemotionBatch.set(ownerDemotionAudit, entry('owner', 'member_role', 'other', identity.other));
+  await assertSucceeds(ownerDemotionBatch.commit());
 });
 
 test('unverified owner email cannot gain owner access', async () => {

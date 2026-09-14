@@ -105,11 +105,12 @@ npm run format
 ## 驗證與權限流程
 
 1. 使用者透過 Google 帳號登入 Firebase Authentication。
-2. 系統先辨識專案擁有者，再查詢 `members` 與 `accessInvites` 判定 Admin 或 User 權限。
+2. 系統先辨識專案擁有者，再查詢 `members` 與 `accessInvites` 判定 Admin 或 User 權限。非 Owner 帳號會即時監聽自己的成員資料；角色變更時立即更新可用功能，帳號停用時自動登出。只有 Owner 能在兩者之間調整成員角色；Admin 僅能啟用或停用一般使用者，不能調整角色、自己或其他 Admin。
 3. 正式站台透過同源 `/__/auth/*` 代理完成 Firebase Popup 驗證，降低第三方儲存限制造成的登入失敗。
 4. Firestore Security Rules 同時檢查登入狀態、角色、資料擁有者與允許修改的欄位。
 5. 重要管理操作寫入 `activityLogs`，保留操作者、動作、紀錄與時間資訊。
 6. `personnel` 與 `equipmentCatalog` 允許所有有效成員讀取，但只有 Owner／Admin 可新增、修改或封存；兩者不提供實體刪除，以保護舊工作紀錄引用。
+7. 權限管理畫面中的角色變更先保留為本機待確認選項，經 Owner 確認後才連同操作紀錄寫入；完整角色範圍說明只向 Owner 顯示。
 
 ## 派工、人員與器材資料流
 

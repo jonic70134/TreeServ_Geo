@@ -70,6 +70,7 @@ import {
   getDocs,
   limit,
   logActivity,
+  normalizeEmail,
   onAuthStateChanged,
   onSnapshot,
   orderBy,
@@ -538,6 +539,30 @@ export default function TreeServApp() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    const authInstance = auth;
+    if (!db || !authInstance || !account || role === 'owner') return;
+    return onSnapshot(
+      doc(db, 'members', account.uid),
+      (snapshot) => {
+        const member = snapshot.data();
+        const memberRole = member?.role;
+        const hasActiveAccess =
+          snapshot.exists() &&
+          member?.status === 'active' &&
+          (memberRole === 'admin' || memberRole === 'user') &&
+          normalizeEmail(String(member?.email ?? '')) === normalizeEmail(account.email ?? '');
+        if (hasActiveAccess) {
+          setRole(memberRole);
+          return;
+        }
+        setAuthError('此帳號的 TreeServ Geo 存取權目前已停用。');
+        void signOut(authInstance);
+      },
+      () => setToast('帳號權限同步暫時中斷，請重新整理後再試。'),
+    );
+  }, [account, role]);
 
   useEffect(() => {
     if (!db || !account || !role) return;

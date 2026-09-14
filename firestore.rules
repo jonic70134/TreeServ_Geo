@@ -198,7 +198,9 @@ service cloud.firestore {
           && getAfter(/databases/$(database)/documents/accessInvites/$(request.auth.token.email)).data.acceptedBy == request.auth.uid)
         || (request.resource.data.action in ['invite_create', 'invite_revoke']
           && isOwner())
-        || (request.resource.data.action in ['member_role', 'member_enable', 'member_disable']
+        || (request.resource.data.action == 'member_role'
+          && isOwner())
+        || (request.resource.data.action in ['member_enable', 'member_disable']
           && isAdmin())
         || (request.resource.data.action in ['personnel_create', 'personnel_update']
           && isAdmin())
@@ -299,7 +301,10 @@ service cloud.firestore {
           isOwner()
           || (isActiveMember()
             && member().role == 'admin'
-            && memberId != request.auth.uid)
+            && memberId != request.auth.uid
+            && resource.data.role == 'user'
+            && request.resource.data.role == resource.data.role
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']))
         );
       allow delete: if isAdmin() && memberId != request.auth.uid;
     }
