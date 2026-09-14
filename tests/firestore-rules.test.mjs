@@ -303,6 +303,26 @@ test('only owner changes roles, while admins can change other user status', asyn
   await assertSucceeds(ownerDemotionBatch.commit());
 });
 
+test('member profiles cannot be physically deleted by any role', async () => {
+  const promotionBatch = writeBatch(owner);
+  const promotionAudit = doc(collection(owner, 'activityLogs'));
+  promotionBatch.update(doc(owner, 'members', 'other'), { role: 'admin', updatedAt: serverTimestamp() });
+  promotionBatch.set(promotionAudit, entry('owner', 'member_role', 'other', identity.other));
+  await assertSucceeds(promotionBatch.commit());
+
+  await assertFails(deleteDoc(doc(admin, 'members', 'other')));
+  await assertFails(deleteDoc(doc(other, 'members', 'admin')));
+  await assertFails(deleteDoc(doc(owner, 'members', 'other')));
+  await assertFails(deleteDoc(doc(member, 'members', 'other')));
+
+  const demotionBatch = writeBatch(owner);
+  const demotionAudit = doc(collection(owner, 'activityLogs'));
+  demotionBatch.update(doc(owner, 'members', 'other'), { role: 'user', updatedAt: serverTimestamp() });
+  demotionBatch.set(demotionAudit, entry('owner', 'member_role', 'other', identity.other));
+  await assertSucceeds(demotionBatch.commit());
+  await assertFails(deleteDoc(doc(other, 'members', 'admin')));
+});
+
 test('unverified owner email cannot gain owner access', async () => {
   const unverified = env.authenticatedContext('unverified', { email: identity.owner, email_verified: false }).firestore();
   await assertFails(getDocs(query(collection(unverified, 'activityLogs'), limit(100))));
