@@ -43,6 +43,21 @@ const jobs = [
 ] as const;
 const crews = [['白', '浩', '陳'], ['肯', '誠', '鴻', '橘'], ['力', '得', '丸'], ['斌', '綺', '方', '康'], ['浩', '肯', '球', '修']] as const;
 const weathers = ['晴時多雲，午後注意高溫。', '多雲，風勢穩定。', '短暫陣雨，備妥雨具並持續監測雷達。', '晴朗乾燥，注意補水與防曬。', '陰天，作業條件尚可。'] as const;
+const accessNotes = [
+  '工具車請停在指定卸料區，消防通道全程保持淨空。',
+  '進場前先向管理單位報到，確認鑰匙與門禁開放時間。',
+  '早上人車流量較大，第一車先完成三角錐與警示帶佈設。',
+  '大型車輛須由引導員步行帶入，轉彎處不得堆放枝材。',
+  '鄰近住戶出入口需保留，碎木與清運集中於午後進行。',
+] as const;
+const safetyNotes = [
+  '落枝區與通行區採雙層管制，場控確認清空後才可下切。',
+  '高空作業前複查錨點與繩路；平均風勢增強時暫停吊掛。',
+  '枝材落點靠近設施，使用導向繩控制並安排專人監看。',
+  '作業區地面不平，移動升降設備前先確認承載與支撐位置。',
+  '上午曝曬較強，每 60 分鐘安排補水並輪替地面警戒人員。',
+  '周邊行人密集，兩端交管人員以無線電確認後才開放通行。',
+] as const;
 
 function dateFromOffset(offset: number) {
   const date = new Date(Date.UTC(2026, 8, 13 + offset));
@@ -59,7 +74,7 @@ function makeRecord(locationId: string, siteIndex: number, recordIndex: number, 
   return {
     id: `generated-${siteIndex + 1}-${recordIndex + 1}`,
     locationId,
-    authorName: 'TreeServ 展示資料',
+    authorName: 'TreeServ 測試資料',
     title,
     notes,
     workDate,
@@ -80,7 +95,7 @@ function makeRecord(locationId: string, siteIndex: number, recordIndex: number, 
     disposal: isRemoval ? '大夾車於 15:00 後進場，木段與枝葉分車清運。' : '枝葉集中碎木後清運，木料依管理單位指定位置堆置。',
     parking: '工具車停放於管理單位指定區域，不占用消防與無障礙通道。',
     equipment: '安全帽、護目鏡、鏈鋸防護褲、攀樹繩、Rigging 繩組、三角錐、警示帶與急救箱。',
-    safetyNotes: '落枝區全程封閉並安排監看；瞬間強風、雷雨或視線不良時立即停止高空作業。',
+    safetyNotes: safetyNotes[(siteIndex * 2 + recordIndex) % safetyNotes.length],
     imageUrls: [], youtubeUrls: [], fileUrls: [],
   };
 }
@@ -93,12 +108,12 @@ export const generatedDemoLocations: SiteLocation[] = regions.flatMap((region, r
     const recordCount = siteIndex % 4;
     return {
       id,
-      name: `${district}${facilityName}（展示）`,
+      name: `${district}${facilityName}（測試）`,
       address: `${city}${district}${roads[facilityIndex % roads.length]} ${18 + ((siteIndex * 17) % 180)} 號`,
       lat: baseLat + (facilityIndex - 2) * 0.0031,
       lng: baseLng + (((facilityIndex * 2) % 5) - 2) * 0.0034,
       status: recordCount === 0 ? '待排程' : siteIndex % 3 === 0 ? '待驗收' : '已排程',
-      attention: `展示資料｜${attention}`,
+      attention: `測試資料｜${attention} ${accessNotes[(regionIndex + facilityIndex * 2) % accessNotes.length]}`,
       aliases: [`${district}${facilityName}`, facilityName],
       isDemo: true,
       records: Array.from({ length: recordCount }, (_item, recordIndex) => makeRecord(id, siteIndex, recordIndex, hospital)),

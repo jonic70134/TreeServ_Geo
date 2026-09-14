@@ -2,11 +2,16 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   AppBar,
+  Autocomplete,
   Avatar,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
@@ -50,6 +55,7 @@ import GroupsRounded from '@mui/icons-material/GroupsRounded';
 import ConstructionRounded from '@mui/icons-material/ConstructionRounded';
 import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded';
 import LinkRounded from '@mui/icons-material/LinkRounded';
+import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import {
   AccessDeniedError,
   auditData,
@@ -411,6 +417,7 @@ export default function TreeServApp() {
   const [search, setSearch] = useState('');
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement>();
   const [recordOpen, setRecordOpen] = useState(false);
+  const [expandedCrewRole, setExpandedCrewRole] = useState<WorkRole | false>(false);
   const [siteOpen, setSiteOpen] = useState(false);
   const [siteForm, setSiteForm] = useState<SiteForm>({ name: '', address: '', attention: '' });
   const [newSite, setNewSite] = useState(false);
@@ -857,25 +864,6 @@ export default function TreeServApp() {
     role: assignmentRole,
   });
 
-  function setSiteLead(person: Personnel) {
-    setForm((current) => ({
-      ...current,
-      siteLead: current.siteLead?.personnelId === person.id ? undefined : personnelAssignment(person, 'site_manager'),
-    }));
-  }
-
-  function toggleCrewAssignment(person: Personnel, assignmentRole: WorkRole) {
-    setForm((current) => {
-      const exists = current.crewAssignments.some((item) => item.personnelId === person.id && item.role === assignmentRole);
-      return {
-        ...current,
-        crewAssignments: exists
-          ? current.crewAssignments.filter((item) => !(item.personnelId === person.id && item.role === assignmentRole))
-          : [...current.crewAssignments, personnelAssignment(person, assignmentRole)],
-      };
-    });
-  }
-
   function applyEquipmentDefaults() {
     const packageNames = new Set<EquipmentPackage>(['general' as EquipmentPackage, ...form.workTypes]);
     const defaults = equipmentCatalog
@@ -982,6 +970,7 @@ export default function TreeServApp() {
     setAutoSavedAt('');
     recordDraftInitialized.current = false;
     recordDraftDirty.current = false;
+    setExpandedCrewRole(false);
     setRecordOpen(true);
   }
   async function openEdit(record: WorkRecord) {
@@ -1015,6 +1004,7 @@ export default function TreeServApp() {
     setAutoSavedAt('');
     recordDraftInitialized.current = false;
     recordDraftDirty.current = false;
+    setExpandedCrewRole(false);
     setRecordOpen(true);
     if (account)
       await logActivity(account, 'edit', record.id, record.title).catch(() =>
@@ -1058,6 +1048,7 @@ export default function TreeServApp() {
     setAutoSavedAt('');
     recordDraftInitialized.current = false;
     recordDraftDirty.current = false;
+    setExpandedCrewRole(false);
     setRecordOpen(true);
   }
   const setField =
@@ -1967,7 +1958,7 @@ export default function TreeServApp() {
                               return <Chip key={assignment.personnelId} label={`${current?.name ?? assignment.nameSnapshot}${current?.code || assignment.codeSnapshot ? ` · ${current?.code ?? assignment.codeSnapshot}` : ''}`} color={archived ? 'default' : 'secondary'} variant={archived ? 'outlined' : 'filled'} />;
                             })}</Stack></Box>;
                           })}
-                          {(activeRecord.crew?.length ?? 0) > 0 && <Box><Typography variant="caption" color="text.secondary">舊紀錄參與人員</Typography><Stack direction="row" sx={{ gap: 0.75, flexWrap: 'wrap' }}>{activeRecord.crew!.map((name, index) => <Chip key={`${name}-${index}`} variant="outlined" label={`${name} · 舊名單`} />)}</Stack></Box>}
+                          {(activeRecord.crew?.length ?? 0) > 0 && <Box><Typography variant="caption" color="text.secondary">參與人員</Typography><Stack direction="row" sx={{ gap: 0.75, flexWrap: 'wrap' }}>{activeRecord.crew!.map((name, index) => <Chip key={`${name}-${index}`} variant="outlined" label={name} />)}</Stack></Box>}
                         </Paper>
                       )}
                       {[
@@ -2238,13 +2229,76 @@ export default function TreeServApp() {
               </TextField>
               <TextField fullWidth label="天氣（自動帶入）" value={weatherLoading ? '正在依施工日期與案場位置查詢…' : form.weather} slotProps={{ input: { readOnly: true } }} helperText="天氣由施工起始日與案場座標自動查詢，不需手動填寫。" />
             </Stack>
-            <Box>
-              <Typography variant="subtitle1" sx={{ fontWeight: 750, mb: 1 }}>案場負責人</Typography>
-              {!activePersonnel.length ? <Alert severity="info" action={canManage ? <Button color="inherit" onClick={() => { setRecordOpen(false); setView('resources'); }}>建立名單</Button> : undefined}>目前沒有可用的工作人員名單。</Alert> : <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>
-                {activePersonnel.filter((person) => !person.allowedRoles.length || person.allowedRoles.includes('site_manager')).map((person) => <Chip key={person.id} clickable color={form.siteLead?.personnelId === person.id ? 'primary' : 'default'} label={`${person.name}${person.code ? ` · ${person.code}` : ''}`} onClick={() => setSiteLead(person)} />)}
-              </Stack>}
-              {form.siteLead && !activePersonnel.some((person) => person.id === form.siteLead!.personnelId) && <Chip sx={{ mt: 1, bgcolor: 'action.disabledBackground' }} onDelete={() => setForm((current) => ({ ...current, siteLead: undefined }))} label={`${personnel.find((item) => item.id === form.siteLead!.personnelId)?.name ?? form.siteLead.nameSnapshot} · 已封存`} />}
-            </Box>
+            <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, bgcolor: 'rgba(22, 101, 52, 0.025)' }}>
+              <Stack spacing={1.5}>
+                <Box>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>人力配置</Typography>
+                  <Typography variant="body2" color="text.secondary">先搜尋案場負責人，再按角色展開選擇參與人員；收合後可直接看完整分工。</Typography>
+                </Box>
+                {!activePersonnel.length ? <Alert severity="info" action={canManage ? <Button color="inherit" onClick={() => { setRecordOpen(false); setView('resources'); }}>建立名單</Button> : undefined}>目前沒有可用的工作人員名單。</Alert> : <Autocomplete
+                  options={activePersonnel.filter((person) => !person.allowedRoles.length || person.allowedRoles.includes('site_manager'))}
+                  value={activePersonnel.find((person) => person.id === form.siteLead?.personnelId) ?? null}
+                  onChange={(_event, person) => setForm((current) => ({ ...current, siteLead: person ? personnelAssignment(person, 'site_manager') : undefined }))}
+                  getOptionLabel={(person) => `${person.name}${person.code ? ` · ${person.code}` : ''}`}
+                  isOptionEqualToValue={(option, value) => option.id === value.id}
+                  noOptionsText="找不到符合的人員"
+                  renderInput={(params) => <TextField {...params} label="案場負責人" placeholder="輸入姓名或代碼搜尋" />}
+                />}
+                {form.siteLead && !activePersonnel.some((person) => person.id === form.siteLead!.personnelId) && <Chip sx={{ alignSelf: 'flex-start', bgcolor: 'action.disabledBackground' }} onDelete={() => setForm((current) => ({ ...current, siteLead: undefined }))} label={`${personnel.find((item) => item.id === form.siteLead!.personnelId)?.name ?? form.siteLead.nameSnapshot} · 已封存`} />}
+                <Divider />
+                <Box>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.25 }}>其他參與人員與角色</Typography>
+                  <Typography variant="body2" color="text.secondary">每個角色只顯示已選人員；需要調整時再展開搜尋。</Typography>
+                </Box>
+                <Stack spacing={0.75}>
+                  {(Object.entries(workRoleLabels) as [WorkRole, string][]).filter(([roleName]) => roleName !== 'site_manager').map(([roleName, label]) => {
+                    const eligible = activePersonnel.filter((person) => !person.allowedRoles.length || person.allowedRoles.includes(roleName));
+                    const activeSelected = eligible.filter((person) => form.crewAssignments.some((assignment) => assignment.role === roleName && assignment.personnelId === person.id));
+                    const archived = form.crewAssignments.filter((assignment) => assignment.role === roleName && !activePersonnel.some((person) => person.id === assignment.personnelId));
+                    const selectedNames = [...activeSelected.map((person) => person.name), ...archived.map((assignment) => assignment.nameSnapshot)];
+                    return <Accordion
+                      key={roleName}
+                      expanded={expandedCrewRole === roleName}
+                      onChange={(_event, expanded) => setExpandedCrewRole(expanded ? roleName : false)}
+                      disableGutters
+                      elevation={0}
+                      sx={{ border: 1, borderColor: 'divider', borderRadius: '10px !important', '&::before': { display: 'none' }, overflow: 'hidden' }}
+                    >
+                      <AccordionSummary expandIcon={<ExpandMoreRounded />} sx={{ minHeight: 54, '& .MuiAccordionSummary-content': { minWidth: 0, alignItems: 'center', gap: 1 } }}>
+                        <Typography sx={{ fontWeight: 750, minWidth: { sm: 110 } }}>{label}</Typography>
+                        <Chip size="small" color={selectedNames.length ? 'secondary' : 'default'} label={`${selectedNames.length} 人`} />
+                        <Typography variant="body2" color="text.secondary" noWrap sx={{ minWidth: 0, flex: 1 }}>
+                          {selectedNames.length ? selectedNames.join('、') : '尚未安排'}
+                        </Typography>
+                      </AccordionSummary>
+                      <AccordionDetails sx={{ pt: 0.5 }}>
+                        <Autocomplete
+                          multiple
+                          disableCloseOnSelect
+                          limitTags={2}
+                          options={eligible}
+                          value={activeSelected}
+                          onChange={(_event, selectedPeople) => setForm((current) => ({
+                            ...current,
+                            crewAssignments: [
+                              ...current.crewAssignments.filter((assignment) => assignment.role !== roleName || !activePersonnel.some((person) => person.id === assignment.personnelId)),
+                              ...selectedPeople.map((person) => personnelAssignment(person, roleName)),
+                            ],
+                          }))}
+                          getOptionLabel={(person) => `${person.name}${person.code ? ` · ${person.code}` : ''}`}
+                          isOptionEqualToValue={(option, value) => option.id === value.id}
+                          noOptionsText="找不到符合的人員"
+                          renderOption={(props, person, { selected }) => <li {...props}><Checkbox checked={selected} sx={{ mr: 1 }} />{person.name}{person.code ? ` · ${person.code}` : ''}</li>}
+                          renderInput={(params) => <TextField {...params} label={`選擇${label}`} placeholder="輸入姓名或代碼搜尋" />}
+                        />
+                        {archived.length > 0 && <Stack direction="row" sx={{ gap: 0.75, flexWrap: 'wrap', mt: 1 }}>{archived.map((assignment) => <Chip key={assignment.personnelId} size="small" sx={{ bgcolor: 'action.disabledBackground' }} label={`${personnel.find((item) => item.id === assignment.personnelId)?.name ?? assignment.nameSnapshot} · 已封存`} onDelete={() => setForm((current) => ({ ...current, crewAssignments: current.crewAssignments.filter((item) => !(item.personnelId === assignment.personnelId && item.role === roleName)) }))} />)}</Stack>}
+                      </AccordionDetails>
+                    </Accordion>;
+                  })}
+                </Stack>
+                {form.crew.length > 0 && <Alert severity="info">未指定角色的人員：<Stack component="span" direction="row" sx={{ display: 'inline-flex', gap: 0.5, ml: 1, flexWrap: 'wrap' }}>{form.crew.map((name, index) => <Chip key={`${name}-${index}`} size="small" label={name} onDelete={() => setForm((current) => ({ ...current, crew: current.crew.filter((_, itemIndex) => itemIndex !== index) }))} />)}</Stack></Alert>}
+              </Stack>
+            </Paper>
             {recordConflictIds.length > 0 && <Alert severity="warning">排程提醒：{recordConflictIds.map((id) => personnel.find((item) => item.id === id)?.name ?? form.crewAssignments.find((item) => item.personnelId === id)?.nameSnapshot ?? form.siteLead?.nameSnapshot).filter(Boolean).join('、')} 在重疊時段已有其他案場。仍可儲存本紀錄。</Alert>}
             {labels.map(([key, label, multiline]) => (
               <TextField
@@ -2258,24 +2312,6 @@ export default function TreeServApp() {
                 onChange={setField(key)}
               />
             ))}
-            <Box>
-              <Typography variant="subtitle1" sx={{ fontWeight: 750, mb: 1 }}>
-                其他參與人員與角色
-              </Typography>
-              <Stack spacing={2}>
-                {(Object.entries(workRoleLabels) as [WorkRole, string][]).filter(([roleName]) => roleName !== 'site_manager').map(([roleName, label]) => {
-                  const archived = form.crewAssignments.filter((assignment) => assignment.role === roleName && !activePersonnel.some((person) => person.id === assignment.personnelId));
-                  return <Box key={roleName}><Typography variant="body2" color="text.secondary" sx={{ mb: 0.75 }}>{label}</Typography><Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.75 }}>
-                    {activePersonnel.filter((person) => !person.allowedRoles.length || person.allowedRoles.includes(roleName)).map((person) => {
-                      const selected = form.crewAssignments.some((assignment) => assignment.personnelId === person.id && assignment.role === roleName);
-                      return <Chip key={person.id} clickable color={selected ? 'secondary' : 'default'} label={`${person.name}${person.code ? ` · ${person.code}` : ''}`} onClick={() => toggleCrewAssignment(person, roleName)} />;
-                    })}
-                    {archived.map((assignment) => <Chip key={assignment.personnelId} sx={{ bgcolor: 'action.disabledBackground' }} label={`${personnel.find((item) => item.id === assignment.personnelId)?.name ?? assignment.nameSnapshot} · 已封存`} onDelete={() => setForm((current) => ({ ...current, crewAssignments: current.crewAssignments.filter((item) => !(item.personnelId === assignment.personnelId && item.role === roleName)) }))} />)}
-                  </Stack></Box>;
-                })}
-                {form.crew.length > 0 && <Alert severity="info">這是舊紀錄的人員名單：<Stack component="span" direction="row" sx={{ display: 'inline-flex', gap: 0.5, ml: 1, flexWrap: 'wrap' }}>{form.crew.map((name, index) => <Chip key={`${name}-${index}`} size="small" label={`${name} · 舊名單`} onDelete={() => setForm((current) => ({ ...current, crew: current.crew.filter((_, itemIndex) => itemIndex !== index) }))} />)}</Stack>舊名單人員可移除，但不能重新加入。</Alert>}
-              </Stack>
-            </Box>
             <Divider />
             <Box>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' }, mb: 1 }}>
