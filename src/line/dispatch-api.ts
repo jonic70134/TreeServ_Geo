@@ -140,11 +140,20 @@ export async function handleDispatchRequest(
     return reply(200, '操作已處理，請查看最新邀請狀態。');
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
+    // 只記錄不含 token、訊息內容或個資的錯誤代碼，方便定位正式站問題。
+    console.error(
+      'line_dispatch_failure',
+      message.slice(0, 160) || 'unknown_error',
+    );
+    const isDomainError = /^[\u3400-\u9fff]/.test(message);
+    const safeCode = /^[a-z][a-z0-9_]{0,63}$/.test(message)
+      ? message
+      : 'upstream_error';
     return reply(
-      503,
-      /^[\u3400-\u9fff]/.test(message)
+      isDomainError ? 409 : 503,
+      isDomainError
         ? message
-        : '暫時無法確認結果，請查看邀請狀態後再操作，勿連續重發。',
+        : `通知服務暫時無法完成（${safeCode}），請稍後再試；若顯示結果待確認，請勿直接重發。`,
     );
   }
 }

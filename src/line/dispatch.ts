@@ -144,7 +144,10 @@ export async function dispatchInvitation(
       throw new Error('已有邀請，請先確認回覆，或取消舊邀請再重發。');
     const location = (await get(`locations/${current.record.locationId}`))
       ?.data;
-    if (!location) throw new Error('請先儲存案場資料。');
+    if (!location)
+      throw new Error(
+        '案場文件不存在，請先儲存案場紀錄；若是舊示範資料，請開啟後重新儲存一次。',
+      );
     const expiresAt = now + invitationLifetime;
     const name = textValue(current.person.name) || input.personnelId;
     const deadline = new Intl.DateTimeFormat('zh-TW', {

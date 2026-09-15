@@ -256,14 +256,15 @@ export default function DispatchInvitations({
                   <Button
                     variant="outlined"
                     disabled={!canSend || !bound}
-                    onClick={() =>
+                    onClick={(event) => {
+                      event.currentTarget.blur();
                       setConfirm({
                         personnelId: assignment.personnelId,
                         name,
                         requestId: crypto.randomUUID(),
                         action: 'send',
-                      })
-                    }
+                      });
+                    }}
                   >
                     {invitation ? '發送新邀請' : '發送 LINE 邀請'}
                   </Button>
@@ -271,14 +272,15 @@ export default function DispatchInvitations({
                 {retry && (
                   <Button
                     disabled={!canSend || !bound}
-                    onClick={() =>
+                    onClick={(event) => {
+                      event.currentTarget.blur();
                       setConfirm({
                         personnelId: assignment.personnelId,
                         name,
                         requestId: invitation.attemptId,
                         action: 'retry',
-                      })
-                    }
+                      });
+                    }}
                   >
                     確認傳送結果
                   </Button>
@@ -287,14 +289,15 @@ export default function DispatchInvitations({
                   <Button
                     color="warning"
                     disabled={busy || !!loadError}
-                    onClick={() =>
+                    onClick={(event) => {
+                      event.currentTarget.blur();
                       setConfirm({
                         personnelId: assignment.personnelId,
                         name,
                         requestId: invitation.attemptId,
                         action: 'cancel',
-                      })
-                    }
+                      });
+                    }}
                   >
                     取消邀請
                   </Button>

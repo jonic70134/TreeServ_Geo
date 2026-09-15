@@ -95,6 +95,7 @@ mindmap
 - 初始化身分由專用服務帳戶完成，不授予其專案 IAM 角色；一次性初始化金鑰在記憶體中使用後立即撤銷，不放本機檔案或正式站。正式站只保存受限工作階段的 refresh token；若要撤銷服務，可停用 Firebase Authentication 中的 `treeserv-line-bot` 身分並更新／移除 Sites secret。不得將本機開發紀錄 MCP 的服務帳戶用於 LINE。
 - LINE 後台 Verify 空事件與「串接測試」仍可使用。綁定及工作回覆只使用 Reply API，保存成功但一次性 Reply 失敗時不重做資料、不改用 Push。
 - 管理員在已儲存工作紀錄的「LINE 個別派工邀請」逐位確認發送。`POST /api/line/dispatch` 以 Firebase accounts:lookup 驗證呼叫者；非 Owner 再用呼叫者自己的 ID token 讀取成員文件確認 active/admin。前端不能指定收件 LINE userId、訊息或期限。後端重新讀取人員、綁定與指派資料，拒絕過去日期、已完成／取消工作及未綁定／封存人員。僅支援私訊，不對群組派工，儲存紀錄不自動發送。
+- 儲存工作紀錄時若連結的是舊示範／匯入案場且尚無 `locations/{locationId}` 文件，會先以該案場的既有名稱、地址與座標補建相同穩定 ID 的案場文件，再保存工作紀錄；因此舊資料不會因畫面可見但後端無案場文件而無法派工。
 - `dispatchInvitations/{SHA256(recordId+分隔符+personnelId)}` 保存每位夥伴在該工作紀錄的最新摘要。只有 Owner／Admin 能讀取，後端才能寫入，禁止含 LINE userId。画面以單一 `where(recordId == ...)` 加 `limit(100)` 訂閱，無新增複合索引。`dispatchAttempts/{UUID}` 僅後端單筆存取，保存實際收件者、不可變訊息、發送者、取消者及回覆稽核，前端不可讀取。
 - 每份邀請自伺服器開始發送起 **8 小時**有效。伺服器在每次按鈕回覆用當下時間驗證期限，`now >= expiresAt` 即拒絕，不使用 LINE 事件原始時間延長期限。畫面自行計算「已失效」，不需要寫回資料庫；已接受／已拒絕為終態，不隨期限變成失效。沒有 Cloud Scheduler、分鐘輪詢、計費啟用、逾時主動 LINE 管理者通知或自動補人。畫面 timer 只更新本機顯示，不查詢後端。
 - Push API 固定使用每次邀請 UUID 作為 `X-Line-Retry-Key`。斷線／5xx 或中途停止保留 sending/uncertain，不宣稱成功；管理者至少隔 30 秒手動確認時，重用同一份收件者／訊息／key，不延長有效期。LINE 200 或附已受理 ID 的 409 轉 pending，明確 4xx 為 failed；已受理不等於保證送達。沒有自動重試或重複 Push。

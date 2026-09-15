@@ -1131,6 +1131,30 @@ export default function TreeServApp() {
       const linkedLocation = sortedLocations.find((location) => location.id === locationId);
       let recordPoint = { lat: form.lat, lng: form.lng };
       if (linkedLocation) recordPoint = { lat: linkedLocation.lat, lng: linkedLocation.lng };
+      // 示範／舊匯入案場原本只存在前端資料；第一次保存工作紀錄時，補建同一個穩定 ID 的案場文件，讓後端派工能安全查到案場資料。
+      const canMaterializeLinkedLocation = Boolean(
+        locationId &&
+          linkedLocation &&
+          /^[A-Za-z0-9_-]{1,128}$/.test(locationId) &&
+          !storedLocations.some((location) => location.id === locationId) &&
+          !newSite,
+      );
+      if (canMaterializeLinkedLocation) {
+        const locationSnapshot = await getDoc(doc(db, 'locations', locationId!));
+        if (!locationSnapshot.exists()) {
+          batch.set(doc(db, 'locations', locationId!), {
+            name: linkedLocation!.name,
+            address: linkedLocation!.address,
+            status: linkedLocation!.status ?? '待排程',
+            attention: linkedLocation!.attention ?? '',
+            aliases: linkedLocation!.aliases ?? [],
+            lat: linkedLocation!.lat,
+            lng: linkedLocation!.lng,
+            createdBy: account.uid,
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
       if (!editing && newSite && !mergeLocationId) {
         const point = await geocodeAddress(form.address.trim());
         recordPoint = point;

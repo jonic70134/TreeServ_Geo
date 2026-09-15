@@ -108,6 +108,22 @@ test('過去日期及不存在人員不發送；4xx 不假報成功；回覆競�
   assert.equal(summary(store).status, 'accepted');
 });
 
+test('已保存工作紀錄但案場文件遺失時，明確提示案場連結問題', async () => {
+  const store = setup();
+  store.documents.delete('locations/site');
+  await assert.rejects(
+    dispatchInvitation(
+      input(),
+      'admin',
+      store,
+      'token',
+      () => assert.fail(),
+      () => start,
+    ),
+    /案場文件不存在/,
+  );
+});
+
 test('驗證 Firebase 身分與管理員角色；不接受未驗證、停用、一般或匿名帳號', async () => {
   const config = { apiKey: 'test', projectId: 'demo', channelAccessToken: 'token', store: () => assert.fail('未授權不可存取服務資料') };
   const request = () => new Request('https://example.test', { method: 'POST', headers: { Authorization: 'Bearer verified-token', 'Content-Type': 'application/json' }, body: JSON.stringify(input()) });
