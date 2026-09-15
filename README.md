@@ -71,4 +71,4 @@ npm run dev
 
 ## Google Sheets 開發紀錄 MCP
 
-專案包含一個本機 MCP，可將開發更新、功能／系統結構／技術棧，以及 Bug 修復寫入固定的 Google 試算表。它只管理三張 TreeServ Geo 專用工作表，不會變更既有工作表。服務帳戶、試算表分享方式與 Codex 連線步驟請見 [`mcp/google-sheets-devlog/README.md`](mcp/google-sheets-devlog/README.md)。
+專案包含一個本機 MCP，可將開發更新與 Bug 修復寫入固定的 Google 試算表。它只管理「開發更新・TreeServ Geo」與「Bug 修復・TreeServ Geo」兩張工作表，不會變更其他既有工作表；新增與查詢結果皆依時間由新到舊排列。系統架構、技術棧與開發環境統一維護於 [`docs/system-architecture.md`](docs/system-architecture.md)。

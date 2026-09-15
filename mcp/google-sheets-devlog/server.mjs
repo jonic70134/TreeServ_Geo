@@ -51,7 +51,10 @@ function recordId(prefix) {
 }
 
 function timestamp(value) {
-  return value || new Date().toISOString();
+  const date = value ? new Date(value) : new Date();
+  const googleSheetsEpoch = Date.UTC(1899, 11, 30);
+  const taipeiOffset = 8 * 60 * 60 * 1000;
+  return (date.getTime() + taipeiOffset - googleSheetsEpoch) / 86_400_000;
 }
 
 function success(message, data) {
@@ -87,30 +90,18 @@ server.registerTool(
     inputSchema: {
       title: requiredText,
       summary: requiredText,
-      status: z.enum(['規劃中', '進行中', '已完成', '已暫停']),
       occurred_at: z.string().datetime().optional(),
-      milestone: optionalText,
       scope: optionalText,
-      owner: optionalText,
-      link: optionalText,
-      git_commit: optionalText,
     },
     annotations: commonAnnotations,
   },
   async (input) => {
     const id = recordId('UPD');
     const result = await devlog.append('updates', [
+      timestamp(input.occurred_at),
       input.title,
       input.summary,
-      input.status,
       input.scope,
-      input.owner,
-      input.link,
-      input.git_commit,
-      new Date().toISOString(),
-      id,
-      timestamp(input.occurred_at),
-      input.milestone,
     ]);
     return success(`已記錄開發更新：${input.title}`, { id, ...result });
   },
@@ -124,25 +115,18 @@ server.registerTool(
     inputSchema: {
       title: requiredText,
       problem: requiredText,
-      root_cause: requiredText,
       fix: requiredText,
-      discovered_at: z.string().datetime().optional(),
       fixed_at: z.string().datetime().optional(),
-      verification: optionalText,
     },
     annotations: commonAnnotations,
   },
   async (input) => {
     const id = recordId('BUG');
     const result = await devlog.append('bugs', [
+      timestamp(input.fixed_at),
       input.title,
       input.problem,
-      input.root_cause,
       input.fix,
-      input.verification,
-      id,
-      timestamp(input.discovered_at),
-      input.fixed_at || '',
     ]);
     return success(`已記錄 Bug：${input.title}`, { id, ...result });
   },

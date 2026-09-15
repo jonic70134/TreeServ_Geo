@@ -6,34 +6,13 @@ export const DEFAULT_SPREADSHEET_ID =
 export const TRACKING_SHEETS = {
   updates: {
     title: '開發更新・TreeServ Geo',
-    headers: [
-      '標題',
-      '更新摘要',
-      '狀態',
-      '影響範圍',
-      '負責人',
-      '相關連結',
-      'Git Commit',
-      '寫入時間',
-      '紀錄 ID',
-      '更新時間',
-      '版本／里程碑',
-    ],
-    widths: [220, 420, 110, 200, 130, 260, 140, 165, 130, 165, 140],
+    headers: ['更新時間', '標題', '更新摘要', '影響範圍'],
+    widths: [165, 220, 420, 200],
   },
   bugs: {
     title: 'Bug 修復・TreeServ Geo',
-    headers: [
-      '標題',
-      '問題描述',
-      '根本原因',
-      '修復方式',
-      '驗證方式',
-      '紀錄 ID',
-      '發現時間',
-      '修復時間',
-    ],
-    widths: [220, 360, 320, 360, 300, 130, 165, 165],
+    headers: ['修復時間', '標題', '問題描述', '修復方式'],
+    widths: [165, 220, 360, 360],
   },
 };
 
@@ -137,7 +116,7 @@ export class GoogleSheetsDevlog {
     });
 
     const formattingRequests = [];
-    for (const [key, definition] of Object.entries(TRACKING_SHEETS)) {
+    for (const definition of Object.values(TRACKING_SHEETS)) {
       const sheet = sheetsByTitle.get(definition.title);
       if (!sheet) throw new Error(`建立工作表失敗：${definition.title}`);
       formattingRequests.push(
@@ -217,8 +196,10 @@ export class GoogleSheetsDevlog {
         });
       });
 
-      const validation = validationFor(key, sheet.sheetId);
-      if (validation) formattingRequests.push(...validation);
+      formattingRequests.push(dateTimeFormatting(sheet.sheetId));
+      formattingRequests.push(
+        sortNewestFirst(sheet.sheetId, definition.headers.length),
+      );
     }
 
     await this.request(':batchUpdate', {
@@ -246,7 +227,7 @@ export class GoogleSheetsDevlog {
   async append(kind, row) {
     const definition = TRACKING_SHEETS[kind];
     if (!definition) throw new Error(`不支援的紀錄類型：${kind}`);
-    await this.ensureTrackingSheets();
+    const setup = await this.ensureTrackingSheets();
     const range = encodeURIComponent(
       `${quoteSheetTitle(definition.title)}!A:${columnName(definition.headers.length)}`,
     );
@@ -257,6 +238,17 @@ export class GoogleSheetsDevlog {
         body: JSON.stringify({ majorDimension: 'ROWS', values: [row] }),
       },
     );
+    await this.request(':batchUpdate', {
+      method: 'POST',
+      body: JSON.stringify({
+        requests: [
+          sortNewestFirst(
+            setup.trackingSheets[kind].sheetId,
+            definition.headers.length,
+          ),
+        ],
+      }),
+    });
     return {
       spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${this.spreadsheetId}/edit`,
       sheet: definition.title,
@@ -277,14 +269,30 @@ export class GoogleSheetsDevlog {
     return rows
       .slice(1)
       .filter((row) => row.some((value) => value !== ''))
-      .slice(-limit)
-      .reverse()
+      .sort((left, right) =>
+        String(right[0] ?? '').localeCompare(String(left[0] ?? '')),
+      )
+      .slice(0, limit)
       .map((row) =>
         Object.fromEntries(
           headers.map((header, index) => [header, row[index] ?? '']),
         ),
       );
   }
+}
+
+function sortNewestFirst(sheetId, columnCount) {
+  return {
+    sortRange: {
+      range: {
+        sheetId,
+        startRowIndex: 1,
+        startColumnIndex: 0,
+        endColumnIndex: columnCount,
+      },
+      sortSpecs: [{ dimensionIndex: 0, sortOrder: 'DESCENDING' }],
+    },
+  };
 }
 
 function columnName(count) {
@@ -298,32 +306,25 @@ function columnName(count) {
   return result;
 }
 
-function listValidation(sheetId, columnIndex, values) {
+function dateTimeFormatting(sheetId) {
   return {
-    setDataValidation: {
+    repeatCell: {
       range: {
         sheetId,
         startRowIndex: 1,
         endRowIndex: 1000,
-        startColumnIndex: columnIndex,
-        endColumnIndex: columnIndex + 1,
+        startColumnIndex: 0,
+        endColumnIndex: 1,
       },
-      rule: {
-        condition: {
-          type: 'ONE_OF_LIST',
-          values: values.map((userEnteredValue) => ({ userEnteredValue })),
+      cell: {
+        userEnteredFormat: {
+          numberFormat: {
+            type: 'DATE_TIME',
+            pattern: 'yyyy-mm-dd hh:mm:ss',
+          },
         },
-        strict: true,
-        showCustomUi: true,
       },
+      fields: 'userEnteredFormat.numberFormat',
     },
   };
-}
-
-function validationFor(kind, sheetId) {
-  if (kind === 'updates')
-    return [
-      listValidation(sheetId, 2, ['規劃中', '進行中', '已完成', '已暫停']),
-    ];
-  return [];
 }

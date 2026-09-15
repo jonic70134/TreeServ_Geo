@@ -15,6 +15,21 @@ function jsonResponse(body, status = 200) {
   });
 }
 
+test('tracking sheets expose only the requested four columns', () => {
+  assert.deepEqual(TRACKING_SHEETS.updates.headers, [
+    '更新時間',
+    '標題',
+    '更新摘要',
+    '影響範圍',
+  ]);
+  assert.deepEqual(TRACKING_SHEETS.bugs.headers, [
+    '修復時間',
+    '標題',
+    '問題描述',
+    '修復方式',
+  ]);
+});
+
 test('ensureTrackingSheets adds only the two dedicated sheets and preserves existing sheets', async () => {
   const calls = [];
   let metadataCalls = 0;
@@ -64,6 +79,19 @@ test('ensureTrackingSheets adds only the two dedicated sheets and preserves exis
     result.createdSheets,
   );
   assert.ok(!JSON.stringify(calls).includes('deleteSheet'));
+  const formatCall = calls
+    .filter((call) => call.url.endsWith(':batchUpdate'))
+    .at(-1);
+  const formatRequests = JSON.parse(formatCall.init.body).requests;
+  assert.deepEqual(
+    formatRequests
+      .filter((request) => request.sortRange)
+      .map((request) => request.sortRange.sortSpecs[0]),
+    [
+      { dimensionIndex: 0, sortOrder: 'DESCENDING' },
+      { dimensionIndex: 0, sortOrder: 'DESCENDING' },
+    ],
+  );
 });
 
 test('append inserts a row in the configured tracking sheet', async () => {
@@ -76,7 +104,7 @@ test('append inserts a row in the configured tracking sheet', async () => {
     if (url.includes('?fields=')) return jsonResponse({ sheets: allSheets });
     if (url.includes(':append'))
       return jsonResponse({
-        updates: { updatedRange: `'${TRACKING_SHEETS.updates.title}'!A2:K2` },
+        updates: { updatedRange: `'${TRACKING_SHEETS.updates.title}'!A2:D2` },
       });
     return jsonResponse({});
   };
@@ -95,6 +123,14 @@ test('append inserts a row in the configured tracking sheet', async () => {
   );
   assert.deepEqual(JSON.parse(appendCall.init.body).values, [row]);
   assert.equal(result.sheet, TRACKING_SHEETS.updates.title);
+  const appendIndex = calls.indexOf(appendCall);
+  const sortCall = calls
+    .slice(appendIndex + 1)
+    .find((call) => call.url.endsWith(':batchUpdate'));
+  assert.deepEqual(
+    JSON.parse(sortCall.init.body).requests[0].sortRange.sortSpecs,
+    [{ dimensionIndex: 0, sortOrder: 'DESCENDING' }],
+  );
 });
 
 test('recent maps rows to headers and returns newest records first', async () => {
@@ -106,9 +142,10 @@ test('recent maps rows to headers and returns newest records first', async () =>
     if (url.includes('/values/') && url.includes('majorDimension=ROWS')) {
       return jsonResponse({
         values: [
-          ['紀錄 ID', '標題'],
-          ['UPD-1', '第一筆'],
-          ['UPD-2', '第二筆'],
+          ['更新時間', '標題'],
+          ['2026-09-13 09:00:00', '較早更新'],
+          ['2026-09-15 09:00:00', '最新更新'],
+          ['2026-09-14 09:00:00', '中間更新'],
         ],
       });
     }
@@ -120,8 +157,9 @@ test('recent maps rows to headers and returns newest records first', async () =>
     fetchImpl,
   });
 
-  assert.deepEqual(await client.recent('updates', 1), [
-    { '紀錄 ID': 'UPD-2', 標題: '第二筆' },
+  assert.deepEqual(await client.recent('updates', 2), [
+    { 更新時間: '2026-09-15 09:00:00', 標題: '最新更新' },
+    { 更新時間: '2026-09-14 09:00:00', 標題: '中間更新' },
   ]);
 });
 
