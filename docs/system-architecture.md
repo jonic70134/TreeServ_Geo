@@ -78,6 +78,17 @@ mindmap
 
 目前 OpenAI Sites 專案未配置 D1 或 R2，主要雲端資料服務為 Firebase。
 
+## LINE 串接準備
+
+- 測試官方帳號為 `@604msveq`，Messaging API Channel ID 為 `2011607818`。
+- `POST /api/line/webhook` 為連線測試接收端：使用後端 `LINE_CHANNEL_SECRET` 對原始請求位元組驗證 HMAC-SHA256 簽章，通過後才解析事件；請求大小限制 256 KiB。
+- LINE 後台 Verify 的空事件可驗證連線；私訊或一般群組輸入「串接測試」時，使用 `LINE_CHANNEL_ACCESS_TOKEN` 呼叫 Reply API。沒有主動推播、沒有發送邀請，也不讀寫 Firestore。
+- 此階段未提供人員綁定、邀請接受／拒絕、催覆或逾時背景工作。派工按鈕與帳號綁定事件回傳未啟用，避免被誤認為已保存。
+- 憑證僅放後端秘密設定，不使用 `VITE_` 前綴、不傳到瀏覽器、不寫入日誌。已忽略的 `.env.line.local` 供本機填寫；不會自動被 Vite 載入或同步到正式站。
+- 本機可使用 Node 22.13+ 執行 `node scripts/check-line-connection.mjs`，只讀取 LINE Bot 資料並核對公開 basic ID，不發送訊息。Channel secret 的正確性仍需由 LINE Webhook Verify 驗證。
+- 設定憑證、發布接收端後，再於 LINE Developers 填入實際 Webhook URL、Verify 並開啟 Use webhook。網址未發布前不可視為已串接。
+- 接收端測試：`node --experimental-strip-types --test tests/line-webhook.test.mjs`；測試使用虛擬資料與替代發送函式，不存取 LINE 或正式資料庫。
+
 ## 開發環境
 
 - Node.js 22.13 以上與 npm
