@@ -26,7 +26,7 @@ export async function processBindingEvent(event: BindingEvent, store: BindingSto
     if (typeof personnelId !== 'string') return { value: isUnlink ? '這個 LINE 帳號尚未綁定工作人員。' : undefined, writes: [] };
     const person = await get(`personnel/${personnelId}`);
     const binding = await get(`lineBindings/${personnelId}`);
-    const challenge = match ? await get(`lineBindingRequests/${personnelId}`) : undefined;
+    const challenge = match || isUnlink ? await get(`lineBindingRequests/${personnelId}`) : undefined;
     if (binding?.data.lastEventId === event.webhookEventId) return { value: undefined, writes: [] };
     if (account && typeof account.data.lastEventAt === 'number' && account.data.lastEventAt >= event.timestamp) return { value: undefined, writes: [] };
     if (match) {

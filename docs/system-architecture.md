@@ -90,6 +90,7 @@ mindmap
 - `lineBindings/{personnelId}` 保存 LINE userId；`lineAccounts/{lineUserId}` 保存反向對應及最後事件時間。只有 LINE 專用服務可讀寫，包含管理員在內的前端不能讀取 LINE userId。`personnel.lineStatus` 為 `bound`／`blocked`／`unbound`，`lineUpdatedAt` 使用伺服器時間；兩者禁止前端偽造，既有無欄位人員視為未綁定。
 - follow／unfollow 更新封鎖狀態；比較事件時間並使用事件 ID 防止重送及較舊事件覆寫新狀態。本人私訊「解除綁定」可清除雙向對應與待用綁定碼；`lineBindingAudit` 僅新增不可改写，記錄人員 ID、動作、管理者（綁定時）與伺服器時間，不保存 LINE userId。
 - 工作夥伴清單、工作紀錄選人及派工總覽顯示綁定狀態。未綁定不阻擋排班；已綁定不表示工作已接受或訊息保證送達，封存人員不可接收新派工。
+- 後端交易沿用 Firebase 用戶端的樂觀鎖定：`batchGet` 取得文件版本，`commit` 以 `updateTime`／`exists: false` 前置條件一次提交；唯讀文件加入 verify。遇到並行封存、重發碼或重複綁定時全部拒絕，不部分寫入。固定受限身分不使用正式環境拒絕的 `beginTransaction` 方式。
 - 後端使用 `LINE_FIREBASE_REFRESH_TOKEN` 取得固定 UID `treeserv-line-bot`、`lineService: true`、`custom` provider 的 Firebase ID token，再存取 REST API，仍受 Security Rules 限制，不使用繞過規則的 Google OAuth 資料庫管理權限。服務只能讀取單筆人員、更新 LINE 狀態及存取綁定相關集合，不能讀寫工作紀錄、成員或案場。
 - 初始化身分由專用服務帳戶完成，不授予其專案 IAM 角色；一次性初始化金鑰在記憶體中使用後立即撤銷，不放本機檔案或正式站。正式站只保存受限工作階段的 refresh token；若要撤銷服務，可停用 Firebase Authentication 中的 `treeserv-line-bot` 身分並更新／移除 Sites secret。不得將本機開發紀錄 MCP 的服務帳戶用於 LINE。
 - LINE 後台 Verify 空事件與「串接測試」仍可使用。回覆只使用 Reply API，保存成功但一次性 Reply 失敗時不重做資料、不改用 Push。尚未啟用主動派工邀請、接受／拒絕、邀請逾時及管理者補人通知；這些狀態不與綁定碼有效期混用。

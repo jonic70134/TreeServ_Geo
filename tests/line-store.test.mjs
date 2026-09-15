@@ -19,9 +19,18 @@ test('LINE REST 後端在 Emulator 中以受限身分原子綁定、封鎖與解
     const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
     const now = Math.floor(Date.now() / 1000);
     const token = `${encode({ alg: 'none' })}.${encode({ sub: 'treeserv-line-bot', user_id: 'treeserv-line-bot', aud: projectId, iss: `https://securetoken.google.com/${projectId}`, iat: now, exp: now + 3600, auth_time: now, lineService: true, firebase: { sign_in_provider: 'custom', identities: {} } })}.`;
+    let injectConflict = false;
     const store = createBindingStore({ projectId, apiKey: 'test-key', refreshToken: 'test-refresh' }, async (url, options) => {
       if (url.startsWith('https://securetoken.googleapis.com/')) return Response.json({ id_token: token, user_id: 'treeserv-line-bot', expires_in: '3600' });
       assert.ok(url.startsWith('https://firestore.googleapis.com/v1/projects/demo-line-rest/'));
+      if (url.endsWith(':commit')) {
+        const payload = JSON.parse(options.body);
+        assert.ok(payload.writes.every((write) => write.currentDocument), '每項寫入必須比對讀取版本或確認文件不存在');
+        if (injectConflict) {
+          injectConflict = false;
+          await env.withSecurityRulesDisabled(async (ctx) => { await setDoc(doc(ctx.firestore(), 'personnel', 'rest-test'), { status: 'archived' }, { merge: true }); });
+        }
+      }
       return fetch(url.replace('https://firestore.googleapis.com', 'http://127.0.0.1:8088'), options);
     });
     const event = { type: 'message', timestamp: Date.now(), webhookEventId: 'rest-bind', source: { type: 'user', userId: `U${'4'.repeat(32)}` }, message: { type: 'text', text: `綁定 rest-test.${random}` } };
@@ -38,6 +47,14 @@ test('LINE REST 後端在 Emulator 中以受限身分原子綁定、封鎖與解
     await env.withSecurityRulesDisabled(async (ctx) => {
       assert.equal((await getDoc(doc(ctx.firestore(), 'personnel', 'rest-test'))).data().lineStatus, 'unbound');
       assert.equal((await getDoc(doc(ctx.firestore(), 'lineBindings', 'rest-test'))).exists(), false);
+      await setDoc(doc(ctx.firestore(), 'lineBindingRequests', 'rest-test'), { codeHash: await hashBindingCode(random), createdBy: 'admin', expiresAt: Timestamp.fromMillis(Date.now() + 60_000) });
+    });
+    injectConflict = true;
+    await assert.rejects(processBindingEvent({ ...event, timestamp: event.timestamp + 3, webhookEventId: 'rest-race' }, store), /line_storage_conflict/);
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      assert.equal((await getDoc(doc(ctx.firestore(), 'personnel', 'rest-test'))).data().lineStatus, 'unbound');
+      assert.equal((await getDoc(doc(ctx.firestore(), 'lineBindings', 'rest-test'))).exists(), false);
+      assert.equal((await getDoc(doc(ctx.firestore(), 'lineBindingRequests', 'rest-test'))).exists(), true);
     });
   } finally { await env.cleanup(); }
 });
