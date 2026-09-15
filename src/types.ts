@@ -22,6 +22,9 @@ export type Personnel = {
   skills: string[];
   allowedRoles: WorkRole[];
   status: 'active' | 'archived';
+  /** 僅由驗證過的 LINE 後端更新，不保存 LINE userId。 */
+  lineStatus?: 'bound' | 'blocked' | 'unbound';
+  lineUpdatedAt?: unknown;
   createdBy?: string;
   createdAt?: unknown;
   updatedAt?: unknown;

@@ -44,9 +44,11 @@ import {
 } from './types';
 import { demoLocations } from './demo-data';
 import { generatedDemoLocations } from './generated-demo-data';
+import BindingDialog from './line/BindingDialog';
+import LineStatusChip from './line/LineStatusChip';
 
 type Props = { account: User; notify: (message: string) => void };
-type PersonnelForm = Omit<Personnel, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>;
+type PersonnelForm = Omit<Personnel, 'id' | 'createdAt' | 'updatedAt' | 'createdBy' | 'lineStatus' | 'lineUpdatedAt'>;
 type EquipmentForm = Omit<EquipmentCatalogItem, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>;
 
 const emptyPersonnel: PersonnelForm = {
@@ -106,6 +108,7 @@ const toggleValue = <T extends string>(values: T[], value: T) =>
 
 export default function ResourceManagement({ account, notify }: Props) {
   const [section, setSection] = useState<'personnel' | 'equipment'>('personnel');
+  const [bindingPersonnelId, setBindingPersonnelId] = useState('');
   const [personnel, setPersonnel] = useState<Personnel[]>([]);
   const [equipment, setEquipment] = useState<EquipmentCatalogItem[]>([]);
   const [personnelForm, setPersonnelForm] = useState<PersonnelForm>();
@@ -274,12 +277,16 @@ export default function ResourceManagement({ account, notify }: Props) {
                       {item.code && <Chip size="small" label={item.code} />}
                       {item.jobTitle && <Chip size="small" variant="outlined" label={item.jobTitle} />}
                       {item.status === 'archived' && <Chip size="small" label="已封存" />}
+                      <LineStatusChip person={item} />
                     </Stack>
                     <Typography color="text.secondary">{item.skills.length ? `技能：${item.skills.join('、')}` : '尚未設定技能'}</Typography>
                     <Typography variant="body2">可擔任：{item.allowedRoles.length ? item.allowedRoles.map((role) => workRoleLabels[role]).join('、') : '未限制'}</Typography>
                     {item.note && <Typography variant="body2">備註：{item.note}</Typography>}
                   </Box>
-                  <Button startIcon={item.status === 'archived' ? <RestoreRounded /> : <EditRounded />} onClick={() => startPersonnel(item)}>編輯</Button>
+                  <Stack direction="row" spacing={1}>
+                    <Button disabled={item.status === 'archived'} onClick={() => setBindingPersonnelId(item.id)}>LINE 綁定</Button>
+                    <Button startIcon={item.status === 'archived' ? <RestoreRounded /> : <EditRounded />} onClick={() => startPersonnel(item)}>編輯</Button>
+                  </Stack>
                 </Stack>
               </Paper>
             ))}
@@ -311,6 +318,7 @@ export default function ResourceManagement({ account, notify }: Props) {
         )}
       </Stack>
 
+      {personnel.find((item) => item.id === bindingPersonnelId) && <BindingDialog key={bindingPersonnelId} person={personnel.find((item) => item.id === bindingPersonnelId)!} account={account} onClose={() => setBindingPersonnelId('')} />}
       <Dialog open={Boolean(personnelForm)} onClose={() => !saving && setPersonnelForm(undefined)} fullWidth maxWidth="sm">
         <DialogTitle>{editingPersonnelId ? '編輯工作人員' : '新增工作人員'}</DialogTitle>
         {personnelForm && <DialogContent dividers><Stack spacing={2}>

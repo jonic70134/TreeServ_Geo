@@ -110,6 +110,7 @@ import AccessManagement from './AccessManagement';
 import PlanBook, { type PlanDraftData } from './PlanBook';
 import DraftList from './DraftList';
 import ResourceManagement from './ResourceManagement';
+import LineStatusChip, { lineStatusLabel } from './line/LineStatusChip';
 import DispatchOverview from './DispatchOverview';
 import { conflictPersonnelIds, isPastDate, localIsoDate } from './scheduling';
 import {
@@ -2264,7 +2265,8 @@ export default function TreeServApp() {
                   options={activePersonnel.filter((person) => !person.allowedRoles.length || person.allowedRoles.includes('site_manager'))}
                   value={activePersonnel.find((person) => person.id === form.siteLead?.personnelId) ?? null}
                   onChange={(_event, person) => setForm((current) => ({ ...current, siteLead: person ? personnelAssignment(person, 'site_manager') : undefined }))}
-                  getOptionLabel={(person) => `${person.name}${person.code ? ` · ${person.code}` : ''}`}
+                  getOptionLabel={(person) => `${person.name}${person.code ? ` · ${person.code}` : ''} · ${lineStatusLabel(person)}`}
+                  renderOption={(props, person) => <li {...props}><Stack sx={{ gap: 0.5 }}><span>{person.name}{person.code ? ` · ${person.code}` : ''}</span><LineStatusChip person={person} /></Stack></li>}
                   isOptionEqualToValue={(option, value) => option.id === value.id}
                   noOptionsText="找不到符合的人員"
                   renderInput={(params) => <TextField {...params} label="案場負責人" placeholder="輸入姓名或代碼搜尋" />}
@@ -2280,7 +2282,7 @@ export default function TreeServApp() {
                     const eligible = activePersonnel.filter((person) => !person.allowedRoles.length || person.allowedRoles.includes(roleName));
                     const activeSelected = eligible.filter((person) => form.crewAssignments.some((assignment) => assignment.role === roleName && assignment.personnelId === person.id));
                     const archived = form.crewAssignments.filter((assignment) => assignment.role === roleName && !activePersonnel.some((person) => person.id === assignment.personnelId));
-                    const selectedNames = [...activeSelected.map((person) => person.name), ...archived.map((assignment) => assignment.nameSnapshot)];
+                    const selectedNames = [...activeSelected.map((person) => `${person.name}${person.code ? ` · ${person.code}` : ''}（${lineStatusLabel(person)}）`), ...archived.map((assignment) => `${assignment.nameSnapshot}（已封存）`)];
                     return <Accordion
                       key={roleName}
                       expanded={expandedCrewRole === roleName}
@@ -2310,10 +2312,10 @@ export default function TreeServApp() {
                               ...selectedPeople.map((person) => personnelAssignment(person, roleName)),
                             ],
                           }))}
-                          getOptionLabel={(person) => `${person.name}${person.code ? ` · ${person.code}` : ''}`}
+                          getOptionLabel={(person) => `${person.name}${person.code ? ` · ${person.code}` : ''} · ${lineStatusLabel(person)}`}
                           isOptionEqualToValue={(option, value) => option.id === value.id}
                           noOptionsText="找不到符合的人員"
-                          renderOption={(props, person, { selected }) => <li {...props}><Checkbox checked={selected} sx={{ mr: 1 }} />{person.name}{person.code ? ` · ${person.code}` : ''}</li>}
+                          renderOption={(props, person, { selected }) => <li {...props}><Checkbox checked={selected} sx={{ mr: 1 }} /><Stack sx={{ gap: 0.5 }}><span>{person.name}{person.code ? ` · ${person.code}` : ''}</span><LineStatusChip person={person} /></Stack></li>}
                           renderInput={(params) => <TextField {...params} label={`選擇${label}`} placeholder="輸入姓名或代碼搜尋" />}
                         />
                         {archived.length > 0 && <Stack direction="row" sx={{ gap: 0.75, flexWrap: 'wrap', mt: 1 }}>{archived.map((assignment) => <Chip key={assignment.personnelId} size="small" sx={{ bgcolor: 'action.disabledBackground' }} label={`${personnel.find((item) => item.id === assignment.personnelId)?.name ?? assignment.nameSnapshot} · 已封存`} onDelete={() => setForm((current) => ({ ...current, crewAssignments: current.crewAssignments.filter((item) => !(item.personnelId === assignment.personnelId && item.role === roleName)) }))} />)}</Stack>}

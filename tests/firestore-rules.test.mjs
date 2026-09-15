@@ -81,6 +81,42 @@ before(async () => {
 
 after(async () => { await env?.cleanup(); });
 
+test('LINE 服務限縮資料權限；管理員也不能偽造已綁定狀態或讀取 LINE ID', async () => {
+  const service = env.authenticatedContext('treeserv-line-bot', { lineService: true, firebase: { sign_in_provider: 'custom' } }).firestore();
+  const spoof = env.authenticatedContext('another-service', { lineService: true, firebase: { sign_in_provider: 'custom' } }).firestore();
+  const person = { name: '綁定測試', code: '', jobTitle: '', note: '', skills: [], allowedRoles: [], status: 'active', createdBy: 'owner', createdAt: Timestamp.fromMillis(1), updatedAt: Timestamp.fromMillis(1) };
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'personnel', 'line-test'), person);
+    await setDoc(doc(ctx.firestore(), 'lineBindings', 'line-test'), { userId: 'private-id' });
+  });
+  const request = { codeHash: 'a'.repeat(64), createdBy: 'admin', createdAt: serverTimestamp(), expiresAt: Timestamp.fromMillis(Date.now() + 1_800_000) };
+  await assertSucceeds(setDoc(doc(admin, 'lineBindingRequests', 'line-test'), request));
+  for (const store of [member, disabled, guest, invitee]) {
+    await assertFails(setDoc(doc(store, 'lineBindingRequests', 'line-test'), request));
+  }
+  await assertFails(setDoc(doc(admin, 'lineBindingRequests', 'line-test'), { ...request, expiresAt: Timestamp.fromMillis(Date.now() + 3_600_000) }));
+  await assertFails(setDoc(doc(admin, 'lineBindingRequests', 'line-test'), { ...request, rawCode: 'secret' }));
+  await assertSucceeds(getDoc(doc(service, 'personnel', 'line-test')));
+  await assertSucceeds(getDoc(doc(service, 'lineBindingRequests', 'line-test')));
+  await assertSucceeds(updateDoc(doc(service, 'personnel', 'line-test'), { lineStatus: 'bound', lineUpdatedAt: serverTimestamp() }));
+  await assertSucceeds(getDoc(doc(member, 'personnel', 'line-test')));
+  for (const store of [owner, admin, member, disabled, guest, invitee, spoof]) {
+    await assertFails(getDoc(doc(store, 'lineBindings', 'line-test')));
+    await assertFails(updateDoc(doc(store, 'personnel', 'line-test'), { lineStatus: 'blocked', lineUpdatedAt: serverTimestamp() }));
+  }
+  await assertSucceeds(updateDoc(doc(admin, 'personnel', 'line-test'), { name: '修改姓名不影響綁定', updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(service, 'personnel', 'line-test'), { name: '服務不能改名' }));
+  await assertFails(getDoc(doc(service, 'workRecords', 'existing')));
+  await assertFails(getDoc(doc(service, 'members', 'admin')));
+  await assertFails(setDoc(doc(service, 'workRecords', 'line-created'), { title: '不能建立' }));
+  await assertFails(getDocs(query(collection(service, 'personnel'), limit(100))));
+  await assertSucceeds(setDoc(doc(service, 'lineAccounts', 'private-id'), { personnelId: 'line-test' }));
+  await assertFails(getDoc(doc(admin, 'lineAccounts', 'private-id')));
+  await assertSucceeds(setDoc(doc(service, 'lineBindingAudit', 'line-event'), { action: 'bind', timestamp: serverTimestamp() }));
+  await assertFails(updateDoc(doc(service, 'lineBindingAudit', 'line-event'), { action: 'rewritten' }));
+  await assertSucceeds(deleteDoc(doc(service, 'lineBindingRequests', 'line-test')));
+});
+
 function updateRecord(db, uid, id, extra = {}) {
   const batch = writeBatch(db);
   const audit = doc(collection(db, 'activityLogs'));

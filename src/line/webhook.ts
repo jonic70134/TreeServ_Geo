@@ -1,8 +1,11 @@
 import { z } from 'zod';
+import { processBindingEvent } from './bindings.ts';
+import type { BindingStore } from './firestore-rest.ts';
 
 export type LineWebhookConfig = {
   channelSecret?: string;
   channelAccessToken?: string;
+  bindingStore?: () => BindingStore;
 };
 
 const maxBodyBytes = 256 * 1024;
@@ -11,6 +14,9 @@ const webhookSchema = z.object({
   events: z.array(z.object({
     type: z.string(),
     replyToken: z.string().optional(),
+    timestamp: z.number().int().nonnegative().optional(),
+    webhookEventId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional(),
+    source: z.object({ type: z.string(), userId: z.string().regex(/^U[0-9a-f]{32}$/).optional() }).passthrough().optional(),
     message: z.object({ type: z.string(), text: z.string().optional() }).passthrough().optional(),
   }).passthrough()).max(100),
 });
@@ -59,7 +65,7 @@ async function verifySignature(body: Uint8Array<ArrayBuffer>, signature: string,
   return crypto.subtle.verify('HMAC', key, signatureBytes, body);
 }
 
-/** 連線測試接收端；尚未啟用派工、人員綁定或排程。 */
+/** 簽章驗證後才處理個別帳號綁定；派工邀請尚未啟用。 */
 export async function handleLineWebhook(
   request: Request,
   config: LineWebhookConfig,
@@ -93,6 +99,38 @@ export async function handleLineWebhook(
   // 未實作的派工按鈕不回傳假成功，讓後續正式流程能接續處理。
   if (payload.data.events.some((event) => event.type === 'postback' || event.type === 'accountLink')) {
     return response(503, 'dispatch_not_enabled');
+  }
+  for (const event of payload.data.events) {
+    const text = event.message?.type === 'text' ? event.message.text?.trim() ?? '' : '';
+    if (!['follow', 'unfollow'].includes(event.type) && !(event.type === 'message' && (text.startsWith('綁定') || text === '解除綁定'))) continue;
+    // 群組不綁定、不儲存任何成員識別，也不在群組回覆綁定資訊。
+    if (event.source?.type !== 'user' || !event.source.userId) continue;
+    if (!event.timestamp || !event.webhookEventId) return response(400, 'invalid_binding_event');
+    if (!config.bindingStore || !config.channelAccessToken) return response(503, 'line_binding_not_configured');
+    try {
+      if (text.startsWith('綁定')) {
+        const profile = await sendRequest(`https://api.line.me/v2/bot/profile/${event.source.userId}`, {
+          headers: { Authorization: `Bearer ${config.channelAccessToken}` }, signal: AbortSignal.timeout(5000),
+        });
+        // 無法取得個人資料時不宣稱綁定成功，亦不覆寫資料庫。
+        if (profile.status === 404) continue;
+        if (!profile.ok) return response(502, 'line_profile_failed');
+      }
+      const reply = await processBindingEvent({
+        type: event.type, timestamp: event.timestamp, webhookEventId: event.webhookEventId,
+        source: { type: 'user', userId: event.source.userId }, message: event.message,
+      }, config.bindingStore());
+      if (reply && event.replyToken) {
+        // 已保存的綁定不因一次性 Reply token 失效而重做；不改用付費 Push。
+        await sendRequest('https://api.line.me/v2/bot/message/reply', {
+          method: 'POST', headers: { Authorization: `Bearer ${config.channelAccessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ replyToken: event.replyToken, messages: [{ type: 'text', text: reply }] }),
+          signal: AbortSignal.timeout(5000),
+        }).catch(() => undefined);
+      }
+    } catch {
+      return response(503, 'line_binding_unavailable');
+    }
   }
   const testEvents = payload.data.events.filter((event) =>
     event.type === 'message' && event.message?.type === 'text' && event.message.text === '串接測試',

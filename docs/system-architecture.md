@@ -14,6 +14,9 @@ flowchart LR
 
     Build[Vinext + Vite] --> Edge[Cloudflare Workers<br/>OpenAI Sites]
     Edge --> UI
+    LINE[LINE 個別私訊] --> Webhook[同源 LINE Webhook<br/>HMAC 驗證]
+    Webhook --> Restricted[固定 Firebase 服務身分<br/>僅限綁定資料]
+    Restricted --> DB
     DB --> Guard[Security Rules<br/>Indexes<br/>查詢上限與分頁]
 ```
 
@@ -78,16 +81,24 @@ mindmap
 
 目前 OpenAI Sites 專案未配置 D1 或 R2，主要雲端資料服務為 Firebase。
 
-## LINE 串接準備
+## LINE 個別帳號綁定
 
 - 測試官方帳號為 `@604msveq`，Messaging API Channel ID 為 `2011607818`。
-- `POST /api/line/webhook` 為連線測試接收端：使用後端 `LINE_CHANNEL_SECRET` 對原始請求位元組驗證 HMAC-SHA256 簽章，通過後才解析事件；請求大小限制 256 KiB。
-- LINE 後台 Verify 的空事件可驗證連線；私訊或一般群組輸入「串接測試」時，使用 `LINE_CHANNEL_ACCESS_TOKEN` 呼叫 Reply API。沒有主動推播、沒有發送邀請，也不讀寫 Firestore。
-- 此階段未提供人員綁定、邀請接受／拒絕、催覆或逾時背景工作。派工按鈕與帳號綁定事件回傳未啟用，避免被誤認為已保存。
+- `POST /api/line/webhook` 使用後端 `LINE_CHANNEL_SECRET` 對原始請求位元組驗證 HMAC-SHA256 簽章，通過後才解析事件；請求大小限制 256 KiB。
+- 管理員在工作夥伴清單產生一次性綁定碼（128-bit 隨機值）。只保存 SHA-256 摘要於 `lineBindingRequests/{personnelId}`；30 分鐘後失效，每位人員只有一組有效碼。Security Rules 限制只有 Owner／Admin 可為使用中的人員產生碼，取消／重發後舊碼不能使用。
+- 夥伴加 Bot 好友後，在個別聊天室傳送「綁定 人員ID.隨機碼」。群組指令完全忽略，不在群組公開綁定資訊。後端檢查來源、個人資料可讀、碼的有效期、封存狀態及一對一對應，透過 Firestore REST transaction 原子消耗綁定碼、保存雙向對應、更新公開狀態與稽核。
+- `lineBindings/{personnelId}` 保存 LINE userId；`lineAccounts/{lineUserId}` 保存反向對應及最後事件時間。只有 LINE 專用服務可讀寫，包含管理員在內的前端不能讀取 LINE userId。`personnel.lineStatus` 為 `bound`／`blocked`／`unbound`，`lineUpdatedAt` 使用伺服器時間；兩者禁止前端偽造，既有無欄位人員視為未綁定。
+- follow／unfollow 更新封鎖狀態；比較事件時間並使用事件 ID 防止重送及較舊事件覆寫新狀態。本人私訊「解除綁定」可清除雙向對應與待用綁定碼；`lineBindingAudit` 僅新增不可改写，記錄人員 ID、動作、管理者（綁定時）與伺服器時間，不保存 LINE userId。
+- 工作夥伴清單、工作紀錄選人及派工總覽顯示綁定狀態。未綁定不阻擋排班；已綁定不表示工作已接受或訊息保證送達，封存人員不可接收新派工。
+- 後端使用 `LINE_FIREBASE_REFRESH_TOKEN` 取得固定 UID `treeserv-line-bot`、`lineService: true`、`custom` provider 的 Firebase ID token，再存取 REST API，仍受 Security Rules 限制，不使用繞過規則的 Google OAuth 資料庫管理權限。服務只能讀取單筆人員、更新 LINE 狀態及存取綁定相關集合，不能讀寫工作紀錄、成員或案場。
+- 初始化身分由專用服務帳戶完成，不授予其專案 IAM 角色；一次性初始化金鑰在記憶體中使用後立即撤銷，不放本機檔案或正式站。正式站只保存受限工作階段的 refresh token；若要撤銷服務，可停用 Firebase Authentication 中的 `treeserv-line-bot` 身分並更新／移除 Sites secret。不得將本機開發紀錄 MCP 的服務帳戶用於 LINE。
+- LINE 後台 Verify 空事件與「串接測試」仍可使用。回覆只使用 Reply API，保存成功但一次性 Reply 失敗時不重做資料、不改用 Push。尚未啟用主動派工邀請、接受／拒絕、邀請逾時及管理者補人通知；這些狀態不與綁定碼有效期混用。
 - 憑證僅放後端秘密設定，不使用 `VITE_` 前綴、不傳到瀏覽器、不寫入日誌。已忽略的 `.env.line.local` 供本機填寫；不會自動被 Vite 載入或同步到正式站。
 - 本機可使用 Node 22.13+ 執行 `node scripts/check-line-connection.mjs`，只讀取 LINE Bot 資料並核對公開 basic ID，不發送訊息。Channel secret 的正確性仍需由 LINE Webhook Verify 驗證。
 - 設定憑證、發布接收端後，再於 LINE Developers 填入實際 Webhook URL、Verify 並開啟 Use webhook。網址未發布前不可視為已串接。
 - 接收端測試：`node --experimental-strip-types --test tests/line-webhook.test.mjs`；測試使用虛擬資料與替代發送函式，不存取 LINE 或正式資料庫。
+- 綁定邏輯：`node --experimental-strip-types --test tests/line-bindings.test.mjs`；本機 Emulator 啟動後另執行 `node --experimental-strip-types --test tests/line-store.test.mjs` 及 `npm run test:rules`，涵蓋真實 REST 交易、封鎖／解除與權限拒絕案例。macOS Emulator 若因中文語系失敗，以 `-Duser.language=en -Duser.country=US` 啟動 Java。
+- 外部規格：[Firebase REST 身分與規則](https://firebase.google.com/docs/firestore/use-rest-api)、[交易讀取](https://firebase.google.com/docs/firestore/reference/rest/v1/projects.databases.documents/batchGet)、[LINE Webhook](https://developers.line.biz/en/docs/messaging-api/receiving-messages/)。
 
 ## 開發環境
 

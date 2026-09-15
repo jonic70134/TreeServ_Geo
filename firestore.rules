@@ -36,6 +36,13 @@ service cloud.firestore {
       return isOwner() || (isActiveMember() && member().role == 'admin');
     }
 
+    function isLineService() {
+      return request.auth != null
+        && request.auth.uid == 'treeserv-line-bot'
+        && request.auth.token.lineService == true
+        && request.auth.token.firebase.sign_in_provider == 'custom';
+    }
+
     function boundedList(maximum) {
       return request.query.limit != null && request.query.limit <= maximum;
     }
@@ -58,7 +65,7 @@ service cloud.firestore {
       let item = request.resource.data;
       return item.keys().hasOnly([
           'name', 'code', 'jobTitle', 'note', 'skills', 'allowedRoles', 'status',
-          'createdBy', 'createdAt', 'updatedAt', 'lastAuditId'
+          'createdBy', 'createdAt', 'updatedAt', 'lastAuditId', 'lineStatus', 'lineUpdatedAt'
         ])
         && item.name is string
         && item.name.size() > 0
@@ -152,17 +159,51 @@ service cloud.firestore {
     }
 
     match /personnel/{personnelId} {
-      allow get: if hasAccess();
+      allow get: if hasAccess() || isLineService();
       allow list: if hasAccess() && boundedList(100);
       allow create: if isAdmin()
         && validPersonnel()
+        && !request.resource.data.keys().hasAny(['lineStatus', 'lineUpdatedAt'])
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.createdAt == request.time;
       allow update: if isAdmin()
         && validPersonnel()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lineStatus', 'lineUpdatedAt'])
         && request.resource.data.createdBy == resource.data.createdBy
         && request.resource.data.createdAt == resource.data.createdAt;
+      allow update: if isLineService()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lineStatus', 'lineUpdatedAt'])
+        && request.resource.data.lineStatus in ['bound', 'blocked', 'unbound']
+        && request.resource.data.lineUpdatedAt == request.time;
       allow delete: if false;
+    }
+
+    match /lineBindingRequests/{personnelId} {
+      allow get: if isAdmin() || isLineService();
+      allow list: if isAdmin() && boundedList(100);
+      allow create, update: if isAdmin()
+        && get(/databases/$(database)/documents/personnel/$(personnelId)).data.status == 'active'
+        && request.resource.data.keys().hasOnly(['codeHash', 'createdBy', 'createdAt', 'expiresAt'])
+        && request.resource.data.codeHash is string
+        && request.resource.data.codeHash.matches('^[a-f0-9]{64}$')
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt <= request.time + duration.value(31, 'm');
+      allow delete: if isAdmin() || isLineService();
+    }
+
+    match /lineBindings/{personnelId} {
+      allow get, create, update, delete: if isLineService();
+    }
+    match /lineAccounts/{lineUserId} {
+      allow get, create, update, delete: if isLineService();
+    }
+    match /lineBindingAudit/{eventId} {
+      allow create: if isLineService() && request.resource.data.timestamp == request.time;
+      allow get: if isAdmin();
+      allow list: if isAdmin() && boundedList(100);
     }
 
     match /equipmentCatalog/{equipmentId} {

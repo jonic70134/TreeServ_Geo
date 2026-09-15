@@ -13,6 +13,21 @@ const requestFor = (body, signature = signatureFor(body)) => new Request('https:
 });
 const neverSend = async () => { assert.fail('此案例不得對外發送訊息'); };
 
+test('群組綁定指令不存取帳號或資料庫', async () => {
+  const body = bodyFor([{ type: 'message', source: { type: 'group', userId: `U${'1'.repeat(32)}` }, message: { type: 'text', text: `綁定 person.${'a'.repeat(32)}` } }]);
+  assert.equal((await handleLineWebhook(requestFor(body), { ...config, bindingStore: () => assert.fail('群組不得綁定') }, neverSend)).status, 200);
+});
+
+test('個別綁定驗證簽章與來源，資料庫失敗不宣稱成功', async () => {
+  const event = { type: 'message', timestamp: 1, webhookEventId: 'bind-test', replyToken: 'test', source: { type: 'user', userId: `U${'1'.repeat(32)}` }, message: { type: 'text', text: `綁定 person.${'a'.repeat(32)}` } };
+  const result = await handleLineWebhook(requestFor(bodyFor([event])), { ...config, bindingStore: () => { throw new Error('secret'); } }, async (url) => {
+    assert.match(url, /\/profile\//);
+    return new Response('{}');
+  });
+  assert.equal(result.status, 503);
+  assert.deepEqual(await result.json(), { code: 'line_binding_unavailable' });
+});
+
 test('LINE Verify 空事件通過簽章後成功，不發送訊息', async () => {
   const result = await handleLineWebhook(requestFor(bodyFor()), { channelSecret: secret }, neverSend);
   assert.equal(result.status, 200);

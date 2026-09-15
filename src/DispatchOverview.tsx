@@ -6,6 +6,7 @@ import MapRounded from '@mui/icons-material/MapRounded';
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded';
 import type { Personnel, SiteLocation, WorkRecord } from './types';
 import { localIsoDate, recordDayRange, recordPersonnel, recordsOverlap } from './scheduling';
+import LineStatusChip from './line/LineStatusChip';
 
 type Props = {
   records: WorkRecord[];
@@ -73,7 +74,7 @@ export default function DispatchOverview({ records, locations, personnel, onOpen
                 return <Box key={localIsoDate(date)} sx={{ p: 1.5, borderRight: 1, borderBottom: 1, borderColor: 'divider', fontWeight: 750, bgcolor: isPast ? 'action.disabledBackground' : undefined }}>{date.toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' })}{isPast && <Typography variant="caption" sx={{ display: 'block' }} color="text.secondary">已過日期</Typography>}</Box>;
               })}
               {visiblePersonnel.map((person) => <Box key={person.id} sx={{ display: 'contents' }}>
-                <Box sx={{ p: 1.5, borderRight: 1, borderBottom: 1, borderColor: 'divider', bgcolor: person.status === 'archived' ? 'action.disabledBackground' : undefined }}><Typography sx={{ fontWeight: 700 }}>{person.name} {person.code}</Typography>{conflictedPersonnel.has(person.id) && <Chip size="small" color="warning" label="重複派工" />}</Box>
+                <Box sx={{ p: 1.5, borderRight: 1, borderBottom: 1, borderColor: 'divider', bgcolor: person.status === 'archived' ? 'action.disabledBackground' : undefined }}><Typography sx={{ fontWeight: 700 }}>{person.name} {person.code}</Typography><LineStatusChip person={person} />{conflictedPersonnel.has(person.id) && <Chip size="small" color="warning" label="重複派工" />}</Box>
                 {days.map((date) => {
                   const isPast = localIsoDate(date) < today;
                   const assigned = recordsOnDay(date).filter((record) => recordPersonnel(record).some((item) => item.personnelId === person.id));
@@ -93,6 +94,10 @@ export default function DispatchOverview({ records, locations, personnel, onOpen
                 {dayRecords.map((record) => <Paper key={record.id} variant="outlined" sx={{ p: 1.25, mb: 1, bgcolor: 'action.hover' }}>
                   <Typography sx={{ fontWeight: 750 }}>{locationName(record)}</Typography>
                   <Typography variant="body2">{record.scheduleSlot ?? '全天'} · {recordPersonnel(record).map((item) => item.nameSnapshot).join('、') || '尚未派工'}</Typography>
+                  <Stack sx={{ gap: 0.75, mt: 1 }}>{recordPersonnel(record).map((assignment) => {
+                    const person = personnel.find((item) => item.id === assignment.personnelId);
+                    return <Stack key={assignment.personnelId} direction="row" sx={{ gap: 1, flexWrap: 'wrap', alignItems: 'center' }}><Typography>{person?.name ?? assignment.nameSnapshot}{person?.code ? ` · ${person.code}` : ''}</Typography>{person ? <LineStatusChip person={person} /> : <Chip size="small" label="LINE 狀態未載入" />}</Stack>;
+                  })}</Stack>
                   <Button size="small" startIcon={<MapRounded />} onClick={() => onOpen(record)}>開啟地圖與紀錄</Button>
                 </Paper>)}
               </Paper>;
