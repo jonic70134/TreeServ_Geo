@@ -121,7 +121,7 @@ service cloud.firestore {
     }
 
     match /locations/{locationId} {
-      allow get: if hasAccess();
+      allow get: if hasAccess() || isLineService();
       allow list: if hasAccess() && boundedList(100);
       allow create: if hasAccess()
         && request.resource.data.createdBy == request.auth.uid
@@ -134,7 +134,7 @@ service cloud.firestore {
     }
 
     match /workRecords/{recordId} {
-      allow get: if hasAccess();
+      allow get: if hasAccess() || isLineService();
       allow list: if hasAccess() && boundedList(100);
       allow create: if hasAccess()
         && request.resource.data.authorId == request.auth.uid
@@ -156,6 +156,21 @@ service cloud.firestore {
       allow delete: if isAdmin()
         && getAfter(/databases/$(database)/documents/recordDeletions/$(recordId)).data.timestamp == request.time
         && getAfter(/databases/$(database)/documents/recordDeletions/$(recordId)).data.actorId == request.auth.uid;
+    }
+
+    // 公開摘要沒有 LINE userId；只有已驗證後端可以更新回覆狀態。
+    match /dispatchInvitations/{invitationId} {
+      allow get: if isAdmin() || isLineService();
+      allow list: if isAdmin() && boundedList(100);
+      allow create, update: if isLineService()
+        && request.resource.data.keys().hasOnly(['recordId', 'personnelId', 'personnelName', 'attemptId', 'status', 'startedAt', 'expiresAt', 'createdBy', 'contextKey', 'createdAt', 'updatedAt', 'respondedAt'])
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+    match /dispatchAttempts/{attemptId} {
+      allow get: if isLineService();
+      allow create, update: if isLineService() && request.resource.data.updatedAt == request.time;
+      allow list, delete: if false;
     }
 
     match /personnel/{personnelId} {

@@ -5,6 +5,7 @@ import { initializeTestEnvironment } from '@firebase/rules-unit-testing';
 import { doc, setDoc, getDoc, Timestamp } from 'firebase/firestore';
 import { createBindingStore } from '../src/line/firestore-rest.ts';
 import { hashBindingCode, processBindingEvent } from '../src/line/bindings.ts';
+import { dispatchInvitation, respondToInvitation } from '../src/line/dispatch.ts';
 
 test('LINE REST 後端在 Emulator 中以受限身分原子綁定、封鎖與解除', async () => {
   const projectId = 'demo-line-rest';
@@ -55,6 +56,26 @@ test('LINE REST 後端在 Emulator 中以受限身分原子綁定、封鎖與解
       assert.equal((await getDoc(doc(ctx.firestore(), 'personnel', 'rest-test'))).data().lineStatus, 'unbound');
       assert.equal((await getDoc(doc(ctx.firestore(), 'lineBindings', 'rest-test'))).exists(), false);
       assert.equal((await getDoc(doc(ctx.firestore(), 'lineBindingRequests', 'rest-test'))).exists(), true);
+    });
+    // 同一個 REST adapter 必須正確解碼巢狀人員配置，並原子保存私密邀請及公開摘要。
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'workRecords', 'dispatch-rest'), { locationId: 'site', title: '測試邀請', workDate: '2099-01-01', crewAssignments: [{ personnelId: 'rest-test', role: 'ground' }] });
+      await setDoc(doc(ctx.firestore(), 'locations', 'site'), { name: '測試案場', address: '測試地址', lat: 25.1 });
+      await setDoc(doc(ctx.firestore(), 'personnel', 'rest-test'), { name: '測試人員', status: 'active', lineStatus: 'bound' });
+      await setDoc(doc(ctx.firestore(), 'lineBindings', 'rest-test'), { userId: `U${'4'.repeat(32)}` });
+    });
+    const request = { recordId: 'dispatch-rest', personnelId: 'rest-test', requestId: crypto.randomUUID(), action: 'send' };
+    let sent = 0;
+    await dispatchInvitation(request, 'admin', store, 'test-token', async () => { sent++; return new Response('{}'); });
+    assert.equal(sent, 1);
+    assert.match(await respondToInvitation(`dispatch:accept:${request.requestId}`, `U${'4'.repeat(32)}`, store), /已確認參加/);
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const data = (await getDoc(doc(ctx.firestore(), 'dispatchAttempts', request.requestId))).data();
+      assert.equal(data.status, 'accepted');
+      assert.ok(data.updatedAt instanceof Timestamp);
+      const summary = (await getDoc(doc(ctx.firestore(), 'dispatchInvitations', data.slotId))).data();
+      assert.equal(summary.status, 'accepted');
+      assert.equal(summary.userId, undefined);
     });
   } finally { await env.cleanup(); }
 });

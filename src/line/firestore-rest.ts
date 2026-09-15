@@ -25,7 +25,30 @@ type FirestoreValue = {
   booleanValue?: boolean;
   timestampValue?: string;
   nullValue?: null;
+  doubleValue?: number;
+  arrayValue?: { values?: FirestoreValue[] };
+  mapValue?: { fields?: Record<string, FirestoreValue> };
 };
+function decodeValue(value: FirestoreValue): unknown {
+  if (value.arrayValue) return (value.arrayValue.values ?? []).map(decodeValue);
+  if (value.mapValue)
+    return Object.fromEntries(
+      Object.entries(value.mapValue.fields ?? {}).map(([key, item]) => [
+        key,
+        decodeValue(item),
+      ]),
+    );
+  return (
+    value.stringValue ??
+    value.booleanValue ??
+    value.doubleValue ??
+    (value.integerValue !== undefined
+      ? Number(value.integerValue)
+      : value.timestampValue
+        ? new Date(value.timestampValue).getTime()
+        : null)
+  );
+}
 type RestDocument = {
   name?: string;
   updateTime?: string;
@@ -85,6 +108,10 @@ export function createBindingStore(
         'lineBindings',
         'lineAccounts',
         'lineBindingAudit',
+        'workRecords',
+        'locations',
+        'dispatchInvitations',
+        'dispatchAttempts',
       ].includes(parts[0]) ||
       !/^[A-Za-z0-9_-]{1,128}$/.test(parts[1])
     )
@@ -128,14 +155,7 @@ export function createBindingStore(
         versions.set(name, { updateTime: document.updateTime! });
         const data: Record<string, unknown> = {};
         for (const [key, value] of Object.entries(document.fields ?? {})) {
-          data[key] =
-            value.stringValue ??
-            value.booleanValue ??
-            (value.integerValue !== undefined
-              ? Number(value.integerValue)
-              : value.timestampValue
-                ? new Date(value.timestampValue).getTime()
-                : null);
+          data[key] = decodeValue(value);
         }
         return { data };
       });

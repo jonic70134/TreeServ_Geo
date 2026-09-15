@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { processBindingEvent } from './bindings.ts';
+import { respondToInvitation } from './dispatch.ts';
 import type { BindingStore } from './firestore-rest.ts';
 
 export type LineWebhookConfig = {
@@ -18,6 +19,7 @@ const webhookSchema = z.object({
     webhookEventId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional(),
     source: z.object({ type: z.string(), userId: z.string().regex(/^U[0-9a-f]{32}$/).optional() }).passthrough().optional(),
     message: z.object({ type: z.string(), text: z.string().optional() }).passthrough().optional(),
+    postback: z.object({ data: z.string().max(300) }).passthrough().optional(),
   }).passthrough()).max(100),
 });
 
@@ -65,7 +67,7 @@ async function verifySignature(body: Uint8Array<ArrayBuffer>, signature: string,
   return crypto.subtle.verify('HMAC', key, signatureBytes, body);
 }
 
-/** 簽章驗證後才處理個別帳號綁定；派工邀請尚未啟用。 */
+/** 簽章驗證後才處理個別帳號綁定與派工回覆。 */
 export async function handleLineWebhook(
   request: Request,
   config: LineWebhookConfig,
@@ -97,10 +99,22 @@ export async function handleLineWebhook(
 
   // LINE 後台 Verify 會傳入空 events；通過簽章即可確認接收端。
   // 未實作的派工按鈕不回傳假成功，讓後續正式流程能接續處理。
-  if (payload.data.events.some((event) => event.type === 'postback' || event.type === 'accountLink')) {
+  if (payload.data.events.some((event) => event.type === 'accountLink')) {
     return response(503, 'dispatch_not_enabled');
   }
   for (const event of payload.data.events) {
+    if (event.type === 'postback') {
+      if (event.source?.type !== 'user' || !event.source.userId) continue;
+      if (!event.postback || !config.bindingStore || !config.channelAccessToken) return response(503, 'dispatch_not_configured');
+      try {
+        const reply = await respondToInvitation(event.postback.data, event.source.userId, config.bindingStore());
+        if (event.replyToken) await sendRequest('https://api.line.me/v2/bot/message/reply', {
+          method: 'POST', headers: { Authorization: `Bearer ${config.channelAccessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ replyToken: event.replyToken, messages: [{ type: 'text', text: reply }] }), signal: AbortSignal.timeout(5000),
+        }).catch(() => undefined);
+      } catch { return response(503, 'dispatch_unavailable'); }
+      continue;
+    }
     const text = event.message?.type === 'text' ? event.message.text?.trim() ?? '' : '';
     if (!['follow', 'unfollow'].includes(event.type) && !(event.type === 'message' && (text.startsWith('綁定') || text === '解除綁定'))) continue;
     // 群組不綁定、不儲存任何成員識別，也不在群組回覆綁定資訊。
@@ -147,7 +161,7 @@ export async function handleLineWebhook(
         },
         body: JSON.stringify({
           replyToken: event.replyToken,
-          messages: [{ type: 'text', text: 'TreeServ Geo 已收到串接測試。這是連線測試，派工邀請與回覆功能尚未啟用。' }],
+          messages: [{ type: 'text', text: 'TreeServ Geo 已收到串接測試。這只是連線測試；工作邀請由管理者另外發送，收到後請於 8 小時內回覆。' }],
         }),
         signal: AbortSignal.timeout(5000),
       });

@@ -106,7 +106,8 @@ test('LINE 服務限縮資料權限；管理員也不能偽造已綁定狀態或
   }
   await assertSucceeds(updateDoc(doc(admin, 'personnel', 'line-test'), { name: '修改姓名不影響綁定', updatedAt: serverTimestamp() }));
   await assertFails(updateDoc(doc(service, 'personnel', 'line-test'), { name: '服務不能改名' }));
-  await assertFails(getDoc(doc(service, 'workRecords', 'existing')));
+  await assertSucceeds(getDoc(doc(service, 'workRecords', 'existing')));
+  await assertFails(getDocs(query(collection(service, 'workRecords'), limit(100))));
   await assertFails(getDoc(doc(service, 'members', 'admin')));
   await assertFails(setDoc(doc(service, 'workRecords', 'line-created'), { title: '不能建立' }));
   await assertFails(getDocs(query(collection(service, 'personnel'), limit(100))));
@@ -115,6 +116,24 @@ test('LINE 服務限縮資料權限；管理員也不能偽造已綁定狀態或
   await assertSucceeds(setDoc(doc(service, 'lineBindingAudit', 'line-event'), { action: 'bind', timestamp: serverTimestamp() }));
   await assertFails(updateDoc(doc(service, 'lineBindingAudit', 'line-event'), { action: 'rewritten' }));
   await assertSucceeds(deleteDoc(doc(service, 'lineBindingRequests', 'line-test')));
+});
+
+test('派工摘要只有管理者可讀，所有前端禁止改寫回覆及讀取私密訊息', async () => {
+  const service = env.authenticatedContext('treeserv-line-bot', { lineService: true, firebase: { sign_in_provider: 'custom' } }).firestore();
+  const unverified = env.authenticatedContext('owner', { email: identity.owner, email_verified: false }).firestore();
+  await assertSucceeds(setDoc(doc(service, 'dispatchInvitations', 'test'), { recordId: 'existing', status: 'pending', updatedAt: serverTimestamp() }));
+  await assertSucceeds(setDoc(doc(service, 'dispatchAttempts', 'test'), { userId: 'private', updatedAt: serverTimestamp() }));
+  for (const store of [owner, admin]) {
+    await assertSucceeds(getDocs(query(collection(store, 'dispatchInvitations'), limit(100))));
+    await assertFails(getDocs(collection(store, 'dispatchInvitations')));
+  }
+  for (const store of [member, disabled, guest, invitee, unverified]) await assertFails(getDoc(doc(store, 'dispatchInvitations', 'test')));
+  for (const store of [owner, admin, member, disabled, guest, invitee, unverified]) {
+    await assertFails(getDoc(doc(store, 'dispatchAttempts', 'test')));
+    await assertFails(updateDoc(doc(store, 'dispatchInvitations', 'test'), { status: 'accepted', updatedAt: serverTimestamp() }));
+  }
+  await assertFails(updateDoc(doc(service, 'dispatchInvitations', 'test'), { userId: 'private', updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(service, 'workRecords', 'existing'), { title: '不能改寫' }));
 });
 
 function updateRecord(db, uid, id, extra = {}) {

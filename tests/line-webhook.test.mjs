@@ -48,13 +48,13 @@ test('限制請求大小，並拒絕有正確簽章但格式錯誤的 JSON', asy
   }
 });
 
-test('一般群組談話不觸發回覆，未啟用的派工按鈕不會假成功', async () => {
+test('一般群組談話不觸發回覆，缺少派工設定不會假成功', async () => {
   assert.equal((await handleLineWebhook(requestFor(bodyFor([{ type: 'message', message: { type: 'text', text: '明天見' } }])), config, neverSend)).status, 200);
-  assert.equal((await handleLineWebhook(requestFor(bodyFor([{ type: 'postback', replyToken: 'test', postback: { data: 'accept' } }])), config, neverSend)).status, 503);
+  assert.equal((await handleLineWebhook(requestFor(bodyFor([{ type: 'postback', source: { type: 'user', userId: `U${'1'.repeat(32)}` }, replyToken: 'test', postback: { data: 'accept' } }])), config, neverSend)).status, 503);
 });
 
 const testMessage = { type: 'message', replyToken: 'test-reply', message: { type: 'text', text: '串接測試' } };
-test('測試指令只使用 Reply API，內容明確表示尚未啟用派工', async () => {
+test('測試指令只使用 Reply API，內容明確區分正式邀請', async () => {
   let calls = 0;
   const send = async (url, options) => {
     calls++;
@@ -62,7 +62,7 @@ test('測試指令只使用 Reply API，內容明確表示尚未啟用派工', a
     assert.equal(options.headers.Authorization, 'Bearer local-test-token');
     const payload = JSON.parse(options.body);
     assert.equal(payload.replyToken, 'test-reply');
-    assert.match(payload.messages[0].text, /尚未啟用/);
+    assert.match(payload.messages[0].text, /只是連線測試/);
     return new Response('{}', { status: 200 });
   };
   assert.equal((await handleLineWebhook(requestFor(bodyFor([testMessage])), config, send)).status, 200);

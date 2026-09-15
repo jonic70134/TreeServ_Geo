@@ -50,6 +50,6 @@ export async function processBindingEvent(event: BindingEvent, store: BindingSto
       );
       if (match) writes.push({ path: `lineBindingRequests/${personnelId}` });
     }
-    return { value: match ? 'LINE 綁定完成，管理者現在可以在派工畫面看到你的綁定狀態。派工邀請功能尚未啟用。' : isUnlink ? '已解除綁定，之後不會透過此綁定寄送工作通知。' : undefined, writes };
+    return { value: match ? 'LINE 綁定完成，管理者現在可以個別發送工作邀請給你。收到邀請後，請於 8 小時內接受或拒絕。' : isUnlink ? '已解除綁定，之後不會透過此綁定寄送工作通知。' : undefined, writes };
   });
 }

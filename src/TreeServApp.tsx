@@ -112,6 +112,7 @@ import DraftList from './DraftList';
 import ResourceManagement from './ResourceManagement';
 import LineStatusChip, { lineStatusLabel } from './line/LineStatusChip';
 import DispatchOverview from './DispatchOverview';
+import DispatchInvitations from './line/DispatchInvitations';
 import { conflictPersonnelIds, isPastDate, localIsoDate } from './scheduling';
 import {
   deleteDraftWithAssets,
@@ -1962,6 +1963,7 @@ export default function TreeServApp() {
                           ))}
                         </Stack>
                       </Box>
+                      {canManage && account && <DispatchInvitations key={`${activeRecord.id}-${account.uid}`} account={account} record={activeRecord} personnel={personnel} isPersisted={[...liveRecords, ...olderRecords].some((item) => item.id === activeRecord.id)} />}
                       {activeRecord.safetyNotes && (
                         <Alert severity="warning">
                           {activeRecord.safetyNotes}
